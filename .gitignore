@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.dist/
+.build/
+.venv/
+venv/
+.env
+.envrc
+
+# IDE
+.vscode/
+.idea/
+
+# Test output
+tests/output/*
+!tests/output/.gitkeep
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+

@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup micromamba
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          micromamba-version: "1.5.8"
+          environment-file: ""
+          create-args: >-
+            -n smsdpro
+            python=3.11
+            rdkit=2025.03.6
+            numpy
+            pillow
+            matplotlib
+            pip
+          condarc: |
+            channels:
+              - conda-forge
+            channel_priority: strict
+
+      - name: Install package
+        shell: bash -l {0}
+        run: |
+          pip install -e .
+          pip install pytest
+
+      - name: Unit tests (fast)
+        shell: bash -l {0}
+        run: |
+          pytest -q tests/test_basic.py
+
+      - name: Benchmark suite (slow)
+        shell: bash -l {0}
+        run: |
+          pytest -q -m slow tests/test_bench_suite.py
+        continue-on-error: true
+
+      - name: Upload artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smsdpro-artifacts
+          path: tests/output/*
+

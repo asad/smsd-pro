@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smsd-pro"
+version = "0.1.0"
+description = "SMSD Pro: fast substructure & MCS engines with rich chemistry (BioInception PVT LTD)"
+readme = "docs/README.md"
+requires-python = ">=3.9, <3.14"
+license = { file = "LICENSE" }
+authors = [{name="BioInception PVT LTD", email="asad.rahman@bioinceptionlabs.com}]
+keywords = ["cheminformatics", "substructure", "MCS", "clique", "medchem", "RDKit"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Scientific/Engineering :: Chemistry"
+]
+
+# RDKit is often best installed via conda-forge; make it optional here.
+dependencies = [
+  "numpy>=1.23",
+  "pillow>=9.5",
+  "matplotlib>=3.7"
+]
+
+[project.optional-dependencies]
+rdkit = [
+  "rdkit-pypi>=2023.9.1"
+]
+
+[project.urls]
+Homepage = "https://github.com/asad/smsd-pro"
+
+[project.scripts]
+smsd-pro = "smsd_pro.engines:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["smsd_pro*"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-q"
+markers = [
+  "slow: long-running benchmark tests"
+]
