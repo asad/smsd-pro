@@ -1,49 +1,33 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "smsd-pro"
-version = "0.5.0"
+version = "0.1.1"
 description = "SMSD Pro: fast substructure & MCS engines with rich chemistry (BioInception PVT LTD)"
 readme = "docs/README.md"
 requires-python = ">=3.9,<3.14"
-license = { file = "LICENSE" }
-authors = [{ name = "BioInception PVT LTD", email = "support@bioinception.example" }]
-keywords = ["cheminformatics", "substructure", "MCS", "clique", "medchem", "RDKit", "SMARTS"]
+# Use SPDX license string to silence the deprecation warning:
+license = "MIT"
+authors = [{ name = "BioInception PVT LTD", email = "asad.rahman@bioinceptionlabs.com" }]
+keywords = ["cheminformatics", "substructure", "MCS", "clique", "medchem", "SMSD", "RDKit"]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
-  "License :: OSI Approved :: MIT License",
   "Topic :: Scientific/Engineering :: Chemistry"
 ]
 dependencies = [
   "numpy>=1.23",
   "pillow>=9.5",
   "matplotlib>=3.7",
-  "rdkit>=2025.03.6"
 ]
-
-[project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-benchmark>=4.0.0", "pandas>=2.2"]
 
 [project.urls]
-Homepage = "https://github.com/bioinception-labs/smsd-pro"
+Homepage = "https://github.com/asad/smsd-pro"
 
-[project.scripts]
-smsd-pro = "smsd_pro.cli:main"
+[project.optional-dependencies]
+rdkit = ["rdkit-pypi>=2025.03.1"]
 
-[tool.setuptools.packages.find]
-where = ["." ]
-include = ["smsd_pro*"]
+[tool.setuptools]
+packages = ["smsd_pro"]          # <— add this
 
-[tool.pytest.ini_options]
-minversion = "7.0"
-addopts = "-q"
-markers = [
-  "slow: long-running benchmark tests"
-]

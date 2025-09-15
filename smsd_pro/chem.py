@@ -1,9 +1,8 @@
-\
-# smsd_pro/chem.py – chemistry utilities, invariants, comparators and SMARTS extraction
+# smsd_pro/chem.py – chemistry utils, invariants, comparators and SMARTS extraction
 from __future__ import annotations
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional, Iterable, Set, Callable, Literal, Any
-import hashlib, functools, re
+import hashlib, re
 
 from rdkit import Chem
 try:
@@ -14,9 +13,8 @@ except Exception:
 # ----------------
 # Standardisation
 # ----------------
-
 class Standardiser:
-    """Conservative standardisation for med‑chem use. Safe on most inputs."""
+    """Conservative standardisation for med‑chem use."""
     def __init__(self):
         self._lfc = rdMolStandardize.LargestFragmentChooser()
         self._norm = rdMolStandardize.Normalizer()
@@ -48,17 +46,28 @@ class Standardiser:
 # -----------------------------
 # WL colours and ring caches
 # -----------------------------
+def _safe_total_valence(a: Chem.Atom) -> int:
+    try:
+        return int(a.GetTotalValence())
+    except Exception:
+        try:
+            # try to (re)sanitise owning mol once
+            Chem.SanitizeMol(a.GetOwningMol(), catchErrors=True)
+            return int(a.GetTotalValence())
+        except Exception:
+            # last resort: degree + neighbour Hs
+            return int(a.GetDegree() + a.GetTotalNumHs(includeNeighbors=True))
 
 def _wl_colours(m: Chem.Mol, rounds: int = 2, include_chirality: bool = False) -> List[int]:
-    N = m.GetNumAtoms()
+    N = int(m.GetNumAtoms())
     base: List[int] = []
     for i in range(N):
-        a = m.GetAtomWithIdx(i)
+        a = m.GetAtomWithIdx(int(i))
         inv = (
-            a.GetAtomicNum(),
-            a.GetFormalCharge(),
-            a.GetTotalValence(),
-            a.GetTotalNumHs(includeNeighbors=True),
+            int(a.GetAtomicNum()),
+            int(a.GetFormalCharge()),
+            _safe_total_valence(a),
+            int(a.GetTotalNumHs(includeNeighbors=True)),
             int(a.GetIsAromatic()),
             int(a.IsInRing()),
             int(a.GetChiralTag()) if include_chirality else 0,
@@ -67,11 +76,11 @@ def _wl_colours(m: Chem.Mol, rounds: int = 2, include_chirality: bool = False) -
                                                   digest_size=4).digest(), "little"))
     adj = [[] for _ in range(N)]
     for b in m.GetBonds():
-        i, j = b.GetBeginAtomIdx(), b.GetEndAtomIdx()
+        i, j = int(b.GetBeginAtomIdx()), int(b.GetEndAtomIdx())
         adj[i].append(j); adj[j].append(i)
     cur = base
     for _ in range(rounds):
-        nxt = []
+        nxt: List[int] = []
         for i in range(N):
             neigh = sorted(cur[j] for j in adj[i])
             nxt.append(int.from_bytes(
@@ -109,7 +118,6 @@ class RingCache:
 # -------------------------
 # Chemistry match options
 # -------------------------
-
 @dataclass(frozen=True)
 class ChemOptions:
     # atom‑level
@@ -131,29 +139,57 @@ class ChemOptions:
     degree_slack: int = 0
     # ring completeness (final mapping validation)
     complete_rings_only: bool = False
-    # NEW: optional hook for recursive SMARTS
+    # hook for recursive SMARTS
     atom_rec_ok: Optional[Callable[[Chem.Mol, Chem.Mol, int, int], bool]] = None
 
 # ----------------
 # SMARTS extractor
 # ----------------
-
 @dataclass(frozen=True)
 class RecSpec:
     kind: str  # "smarts" or "name"
     expr: str
 
 class SmartsPattern:
-    """Extract constraints from SMARTS/SMILES and detect $() per atom."""
+    """Extract constraints and $() per atom. Uses RDKit for topology; we strip $name first."""
     def __init__(self, smarts_or_smiles: str, *, is_smarts: bool = True):
         self.src = smarts_or_smiles
         self.is_smarts = is_smarts
-        self.m = Chem.MolFromSmarts(smarts_or_smiles) if is_smarts else Chem.MolFromSmiles(smarts_or_smiles)
+        if is_smarts:
+            sanitized = self.strip_named_predicates(smarts_or_smiles)
+            self.m = Chem.MolFromSmarts(sanitized)
+        else:
+            self.m = Chem.MolFromSmiles(smarts_or_smiles)
         if self.m is None:
             raise ValueError(f"Cannot parse: {smarts_or_smiles}")
         self.N = self.m.GetNumAtoms()
         self.E = self.m.GetNumBonds()
         self.rec_by_atom: Dict[int, List[RecSpec]] = self._extract_recursive_specs(smarts_or_smiles) if is_smarts else {}
+
+    @staticmethod
+    def strip_named_predicates(smarts: str) -> str:
+        """Remove $name tokens (not $()) inside bracket atoms; tidy semicolons."""
+        out = []
+        i, n = 0, len(smarts)
+        while i < n:
+            c = smarts[i]
+            if c == '[':
+                # copy bracket content but drop $name
+                depth, j = 1, i+1
+                while j < n and depth > 0:
+                    if smarts[j] == '[': depth += 1
+                    elif smarts[j] == ']': depth -= 1
+                    j += 1
+                content = smarts[i+1:j-1]
+                # remove $word not followed by '('
+                content = re.sub(r"\$[A-Za-z_]\w*(?!\s*\()", "", content)
+                # collapse multiple semicolons and trim
+                content = re.sub(r";{2,}", ";", content).strip(";")
+                out.append("[" + content + "]")
+                i = j
+            else:
+                out.append(c); i += 1
+        return "".join(out)
 
     @staticmethod
     def _extract_recursive_specs(smarts: str) -> Dict[int, List[RecSpec]]:
@@ -176,16 +212,18 @@ class SmartsPattern:
         while i < n:
             c = smarts[i]
             if c == '[':
-                depth, j = 1, i+1
+                depth, j = 1, i + 1
                 while j < n and depth > 0:
                     if smarts[j] == '[': depth += 1
                     elif smarts[j] == ']': depth -= 1
                     j += 1
                 content = smarts[i+1:j-1]
+                # 1) $([...]) blocks
                 k = 0
                 while k < len(content):
                     pos = content.find('$(', k)
-                    if pos == -1: break
+                    if pos == -1:
+                        break
                     block, nx = parse_paren_block(content, pos+1)
                     expr = block.strip()
                     if re.fullmatch(r'[A-Za-z_]\w*', expr):
@@ -193,12 +231,15 @@ class SmartsPattern:
                     else:
                         out.setdefault(atom_idx, []).append(RecSpec("smarts", expr))
                     k = nx
+                # 2) bare $name occurrences
+                for m in re.finditer(r"\$([A-Za-z_]\w*)(?!\s*\()", content):
+                    out.setdefault(atom_idx, []).append(RecSpec("name", m.group(1)))
                 atom_idx += 1
                 i = j
                 continue
 
             if c.isalpha():
-                if i+1 < n and smarts[i:i+2] in two_letter:
+                if i + 1 < n and smarts[i:i+2] in two_letter:
                     i += 2
                 else:
                     i += 1
@@ -208,40 +249,41 @@ class SmartsPattern:
             i += 1
         return out
 
-# ----------------------------
-# Atom and bond compat checks
-# ----------------------------
-
+# -------------------------
+# Atom & bond comparators
+# -------------------------
 def _atoms_compatible(q: Chem.Atom, t: Chem.Atom, rc_q: RingCache, rc_t: RingCache, C: ChemOptions) -> bool:
-    if C.match_atom_type and q.GetAtomicNum() != t.GetAtomicNum(): return False
+    # allow SMARTS/wildcards: if q atomic number is 0 (unspecified), don't fail on type
+    if C.match_atom_type:
+        qz = int(q.GetAtomicNum())
+        if qz != 0 and qz != int(t.GetAtomicNum()):
+            return False
     if C.match_isotope and q.GetIsotope() != t.GetIsotope(): return False
     if C.match_formal_charge and q.GetFormalCharge() != t.GetFormalCharge(): return False
-    if C.aromaticity_mode == "strict":
-        if q.GetIsAromatic() != t.GetIsAromatic(): return False
+    if C.aromaticity_mode == "strict" and (q.GetIsAromatic() != t.GetIsAromatic()): return False
     if C.ring_matches_ring_only and q.IsInRing() and not t.IsInRing(): return False
-    if C.ring_fusion_strict:
-        if rc_q.atom_ring_count[q.GetIdx()] != rc_t.atom_ring_count[t.GetIdx()]: return False
-    if C.match_valence and q.GetTotalValence() != t.GetTotalValence(): return False
+    if C.ring_fusion_strict and rc_q.atom_ring_count[q.GetIdx()] != rc_t.atom_ring_count[t.GetIdx()]: return False
+    if C.match_valence and _safe_total_valence(q) != _safe_total_valence(t): return False
     if C.use_chirality and q.GetChiralTag() != t.GetChiralTag(): return False
-    # Recursive SMARTS hook (if present)
     if C.atom_rec_ok is not None:
         qmol = rc_q.m if hasattr(rc_q, "m") else q.GetOwningMol()
         tmol = rc_t.m if hasattr(rc_t, "m") else t.GetOwningMol()
-        if not C.atom_rec_ok(qmol, tmol, int(q.GetIdx()), int(t.GetIdx())):
-            return False
+        if not C.atom_rec_ok(qmol, tmol, int(q.GetIdx()), int(t.GetIdx())): return False
     return True
+
+
 
 def _ring_size_ok_bond(qb: Chem.Bond, tb: Chem.Bond, rc_q: RingCache, rc_t: RingCache, C: ChemOptions) -> bool:
     if C.ring_size_mode == "ignore": return True
-    q_sizes = rc_q.bond_ring_sizes.get(int(qb.GetIdx()), set())
-    t_sizes = rc_t.bond_ring_sizes.get(int(tb.GetIdx()), set())
+    q_sizes = rc_q.bond_ring_sizes.get(qb.GetIdx(), set())
+    t_sizes = rc_t.bond_ring_sizes.get(tb.GetIdx(), set())
     if not q_sizes or not t_sizes:
         return C.ring_size_mode != "exact"
     if C.ring_size_mode == "exact":
         return any(sz in t_sizes for sz in q_sizes)
     for sq in q_sizes:
         for st in t_sizes:
-            if abs(sq - st) <= C.ring_size_tolerance:
+            if abs(int(sq) - int(st)) <= int(C.ring_size_tolerance):
                 return True
     return False
 
@@ -251,18 +293,17 @@ def _bond_stereo_ok(qb: Chem.Bond, tb: Chem.Bond, mode: Literal["off","defined",
         return True
     sQ, sT = qb.GetStereo(), tb.GetStereo()
     if mode == "defined":
-        return sQ != Chem.BondStereo.STEREONONE and sT != Chem.BondStereo.STEREONONE
+        return (sQ != Chem.BondStereo.STEREONONE) and (sT != Chem.BondStereo.STEREONONE)
     if mode == "exact":
         if sQ == Chem.BondStereo.STEREOANY:
             return sT != Chem.BondStereo.STEREONONE
         return sQ == sT and sQ != Chem.BondStereo.STEREONONE
     return True
 
-def _bonds_compatible(qb: Optional[Chem.Bond], tb: Optional[Chem.Bond],
-                      rc_q: RingCache, rc_t: RingCache, C: ChemOptions) -> bool:
+def _bonds_compatible(qb: Optional[Chem.Bond], tb: Optional[Chem.Bond], rc_q: RingCache, rc_t: RingCache, C: ChemOptions) -> bool:
     if (qb is None) != (tb is None): return False
     if qb is None: return True
-    if C.ring_matches_ring_only and qb.IsInRing() and not (tb and tb.IsInRing()): return False
+    if C.ring_matches_ring_only and qb.IsInRing() and not tb.IsInRing(): return False
     if C.match_bond_order == "strict":
         if qb.GetBondType() != tb.GetBondType(): return False
     else:

@@ -1,4 +1,3 @@
-\
 # smsd_pro/viz.py – side-by-side PNG comparison of SMSD vs RDKit
 from __future__ import annotations
 from dataclasses import dataclass
@@ -9,7 +8,7 @@ from rdkit import Chem
 from rdkit.Chem import Draw
 
 from .engines import SMSD, SubstructureOptions, MCSOptions, MatchResult
-from .chem import ChemOptions
+from .chem import ChemOptions, SmartsPattern
 
 @dataclass
 class VizConfig:
@@ -29,7 +28,6 @@ def _bond_indices_from_mapping(q: Chem.Mol, t: Chem.Mol, m: Dict[int,int]) -> Li
     return idxs
 
 def _to_pil(image_or_svg):
-    """RDKit can return a PIL.Image.Image or raw bytes; coerce to PIL.Image.Image."""
     try:
         from PIL import Image
     except Exception as e:
@@ -38,7 +36,6 @@ def _to_pil(image_or_svg):
         return image_or_svg
     if isinstance(image_or_svg, (bytes, bytearray)):
         return Image.open(BytesIO(image_or_svg))
-    # fallback: RDKit may return an IPython SVG; re-render
     if hasattr(image_or_svg, "data"):
         return Image.open(BytesIO(image_or_svg.data))
     raise TypeError("Unsupported image object from RDKit.")
@@ -61,7 +58,6 @@ def _draw_pair_grid(mols: List[Chem.Mol],
     return _to_pil(img)
 
 # -------- Substructure --------
-
 def viz_compare_substructure_png(query: str|Chem.Mol,
                                  target: str|Chem.Mol,
                                  *,
@@ -69,7 +65,6 @@ def viz_compare_substructure_png(query: str|Chem.Mol,
                                  smsd_opt: SubstructureOptions = SubstructureOptions(),
                                  mapping_index: int = 0,
                                  cfg: VizConfig = VizConfig()):
-
     smsd = SMSD(query, target, chem=smsd_chem)
     maps = smsd.substructure_all(smsd_opt)
     q = smsd.q; t = smsd.t
@@ -84,13 +79,15 @@ def viz_compare_substructure_png(query: str|Chem.Mol,
     t_atoms = sorted(mr.mapping.values())
     t_bonds = _bond_indices_from_mapping(q, t, mr.mapping)
 
-    # RDKit reference mapping
-    if isinstance(query, str) and any(ch in query for ch in "*[]$;@/\\!?"):
-        q_rdk = Chem.MolFromSmarts(query)
+    # RDKit reference mapping (strip $name so RDKit can parse)
+    if isinstance(query, str):
+        q_try = Chem.MolFromSmiles(query)
+        if q_try is None:
+            q_try = Chem.MolFromSmarts(SmartsPattern.strip_named_predicates(query))
     else:
-        q_rdk = Chem.MolFromSmiles(query) if isinstance(query, str) else query
-    t_rdk = Chem.MolFromSmiles(target) if isinstance(target, str) else target
-    rdkit_matches = list(t_rdk.GetSubstructMatches(q_rdk, uniquify=True)) if q_rdk and t_rdk else []
+        q_try = query
+    t_try = Chem.MolFromSmiles(target) if isinstance(target, str) else target
+    rdkit_matches = list(t_try.GetSubstructMatches(q_try, uniquify=True)) if q_try and t_try else []
     atoms_rdkit = list(rdkit_matches[0]) if rdkit_matches else []
 
     legends = [f"{cfg.title_smsd}: atoms={len(q_atoms)}",
@@ -105,7 +102,6 @@ def viz_compare_substructure_png(query: str|Chem.Mol,
     return img
 
 # -------- MCS --------
-
 def viz_compare_mcs_png(mol1: str|Chem.Mol,
                         mol2: str|Chem.Mol,
                         *,
@@ -124,17 +120,21 @@ def viz_compare_mcs_png(mol1: str|Chem.Mol,
     a2 = sorted(mr.mapping.values())
     b2 = _bond_indices_from_mapping(m1, m2, mr.mapping)
 
-    # RDKit FMCS reference (lengths only)
+    # RDKit FMCS reference (just to show sizes)
     from rdkit.Chem import rdFMCS
-    p = rdFMCS.MCSParameters(); p.MaximizeBonds=True; p.Timeout=5
+    p = rdFMCS.MCSParameters()
+    p.MaximizeBonds = True; p.Timeout = 5
     res = rdFMCS.FindMCS([m1, m2], p)
     a_ref = b_ref = 0
     if not res.canceled and res.smartsString:
         patt = Chem.MolFromSmarts(res.smartsString)
-        if patt: a_ref, b_ref = patt.GetNumAtoms(), patt.GetNumBonds()
+        if patt:
+            a_ref, b_ref = patt.GetNumAtoms(), patt.GetNumBonds()
 
     legends = [f"{cfg.title_smsd}: atoms={len(a1)}; bonds={len(b2)}",
                f"{cfg.title_rdkit}: atoms={a_ref}; bonds={b_ref}"]
-    img = _draw_pair_grid([m1, m2], legends, highlights=[(a1, []), (a2, b2)], size=cfg.subimg_size)
+    img = _draw_pair_grid([m1, m2], legends,
+                          highlights=[(a1, []), (a2, b2)],
+                          size=cfg.subimg_size)
     if cfg.save_png: img.save(cfg.save_png)
     return img

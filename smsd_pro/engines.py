@@ -1,23 +1,19 @@
-\
 # smsd_pro/engines.py – VF2++ substructure, BBMC MCS, McGregor extend, and facade
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Dict, List, Tuple, Optional, Iterable, Set, Callable, Literal, Any
 import time
 import numpy as np
-
 from rdkit import Chem
 
 from .chem import (
-    ChemOptions, Standardiser, RingCache, _atoms_compatible, _bonds_compatible, _wl_colours
+    ChemOptions, Standardiser, RingCache, _atoms_compatible, _bonds_compatible, _wl_colours, SmartsPattern
 )
-from .chem import SmartsPattern
-from .smarts_vm import RecPredicateVM
+from .smarts_vm import RecPredicateVM, RecSpec
 
 # ----------------------------
 # Public option dataclasses
 # ----------------------------
-
 @dataclass(frozen=True)
 class SubstructureOptions:
     engine: Literal["AUTO", "VF2PP"] = "AUTO"
@@ -47,7 +43,6 @@ class MatchResult:
 # --------------------
 # VF2++ state machine
 # --------------------
-
 class _VF2PPState:
     def __init__(self, q: Chem.Mol, t: Chem.Mol, C: ChemOptions):
         self.q, self.t, self.C = q, t, C
@@ -102,50 +97,60 @@ class _VF2PPState:
 
     def _cand_targets(self, i: int) -> Iterable[int]:
         for j in np.flatnonzero(self.compat[i]):
-            j = int(j)
-            if int(self.t2q[j]) != -1: continue
+            if self.t2q[j] != -1: continue
             ok = True
             for iqn in self.QN[i]:
-                tj = int(self.q2t[iqn])
+                tj = self.q2t[iqn]
                 if tj != -1:
-                    qb = self.q.GetBondBetweenAtoms(int(i), int(iqn))
+                    qb = self.q.GetBondBetweenAtoms(i, iqn)
                     tb = self.t.GetBondBetweenAtoms(int(j), int(tj))
                     if not _bonds_compatible(qb, tb, self.rc_q, self.rc_t, self.C):
                         ok = False; break
             if not ok: continue
-            q_term = sum(1 for u in self.QN[i] if int(self.q2t[u])==-1 and int(self.qterm[u])>0)
-            q_new  = sum(1 for u in self.QN[i] if int(self.q2t[u])==-1 and int(self.qterm[u])==0)
-            t_term = sum(1 for v in self.TN[j] if int(self.t2q[v])==-1 and int(self.tterm[v])>0)
-            t_new  = sum(1 for v in self.TN[j] if int(self.t2q[v])==-1 and int(self.tterm[v])==0)
+            q_term = sum(1 for u in self.QN[i] if self.q2t[u]==-1 and self.qterm[u]>0)
+            q_new  = sum(1 for u in self.QN[i] if self.q2t[u]==-1 and self.qterm[u]==0)
+            t_term = sum(1 for v in self.TN[j] if self.t2q[v]==-1 and self.tterm[v]>0)
+            t_new  = sum(1 for v in self.TN[j] if self.t2q[v]==-1 and self.tterm[v]==0)
             if q_term <= t_term and q_new <= t_new:
                 yield int(j)
 
     def pick_next_q(self, connected_only: bool) -> Optional[int]:
-        cand = [i for i in range(self.Nq) if int(self.q2t[i])==-1 and (int(self.qterm[i])>0 or not connected_only or int(self.depth)==0)]
+        cand = [i for i in range(self.Nq) if self.q2t[i]==-1 and (self.qterm[i]>0 or not connected_only or self.depth==0)]
         if not cand: return None
         best, best_cnt, best_key = None, 1<<30, None
         for i in cand:
             cnt = 0
-            for _ in self._cand_targets(int(i)):
+            for _ in self._cand_targets(i):
                 cnt += 1
                 if cnt >= best_cnt: break
-            qa = self.q.GetAtomWithIdx(int(i))
-            key = (-qa.GetDegree(), -int(qa.IsInRing()), -int(qa.GetIsAromatic()), int(i))
+            qa = self.q.GetAtomWithIdx(i)
+            key = (-qa.GetDegree(), -int(qa.IsInRing()), -int(qa.GetIsAromatic()), i)
             if cnt < best_cnt or (cnt == best_cnt and (best_key is None or key < best_key)):
-                best, best_cnt, best_key = int(i), cnt, key
+                best, best_cnt, best_key = i, cnt, key
         return best
 
+# --------------
+# Search helpers
+# --------------
 def _mapping_has_complete_rings(q: Chem.Mol, t: Chem.Mol, m: Dict[int,int]) -> bool:
     rc_q, rc_t = RingCache(q), RingCache(t)
+    mapped_pairs = {(qi, qj): (m[qi], m[qj]) for b in q.GetBonds()
+                    for qi,qj in [(b.GetBeginAtomIdx(), b.GetEndAtomIdx())]
+                    if qi in m and qj in m}
+    t_bond_set = set()
+    for (qi,qj),(ti,tj) in mapped_pairs.items():
+        b = t.GetBondBetweenAtoms(ti, tj)
+        if b is None: return False
+        t_bond_set.add(b.GetIdx())
     for ring in rc_q.bond_rings:
         mapped_bonds = []
         for bi in ring:
-            bq = q.GetBondWithIdx(int(bi))
-            qi, qj = int(bq.GetBeginAtomIdx()), int(bq.GetEndAtomIdx())
+            bq = q.GetBondWithIdx(bi)
+            qi, qj = bq.GetBeginAtomIdx(), bq.GetEndAtomIdx()
             if qi in m and qj in m:
-                tb = t.GetBondBetweenAtoms(int(m[qi]), int(m[qj]))
+                tb = t.GetBondBetweenAtoms(m[qi], m[qj])
                 if tb is None: return False
-                mapped_bonds.append(int(tb.GetIdx()))
+                mapped_bonds.append(tb.GetIdx())
         if mapped_bonds and not any(set(mapped_bonds).issubset(R) for R in rc_t.bond_rings):
             return False
     return True
@@ -160,7 +165,7 @@ def _vf2pp_search(q: Chem.Mol, t: Chem.Mol, C: ChemOptions, opt: SubstructureOpt
         if opt.time_limit_s is not None and (time.time() - start) > float(opt.time_limit_s):
             return False
         if st.finished():
-            m = {int(i):int(st.q2t[i]) for i in range(st.Nq)}
+            m = {i:int(st.q2t[i]) for i in range(st.Nq)}
             if C.complete_rings_only and not _mapping_has_complete_rings(q, t, m):
                 return False
             key = tuple(sorted(m.values())) if opt.uniquify_mode=="target_set" else tuple(sorted(m.items()))
@@ -168,20 +173,21 @@ def _vf2pp_search(q: Chem.Mol, t: Chem.Mol, C: ChemOptions, opt: SubstructureOpt
                 seen.add(key); results.append(m)
             return True
         i = st.pick_next_q(connected_only=opt.connected_only)
-        if i is None: return False
+        if i is None:
+            return False
         any_hit = False
-        for j in st._cand_targets(int(i)):
+        for j in st._cand_targets(i):
             if opt.induced:
                 ok_induced = True
                 for iq in range(st.Nq):
-                    tj = int(st.q2t[iq])
-                    if tj != -1 and iq != int(i):
-                        qb = q.GetBondBetweenAtoms(int(i), int(iq))
-                        tb = t.GetBondBetweenAtoms(int(j), int(tj))
+                    tj = st.q2t[iq]
+                    if tj != -1 and iq != i:
+                        qb = q.GetBondBetweenAtoms(i, iq)
+                        tb = t.GetBondBetweenAtoms(j, int(tj))
                         if (qb is None) != (tb is None):
                             ok_induced = False; break
                 if not ok_induced: continue
-            st.add(int(i), int(j))
+            st.add(i, j)
             if rec():
                 any_hit = True
                 if opt.max_matches and len(results) >= int(opt.max_matches):
@@ -195,7 +201,6 @@ def _vf2pp_search(q: Chem.Mol, t: Chem.Mol, C: ChemOptions, opt: SubstructureOpt
 # ------------------------
 # MCS via modular product
 # ------------------------
-
 @dataclass(frozen=True)
 class _MPNode:
     qi: int
@@ -240,13 +245,11 @@ def _bbmc_max_cliques(adj: List[int], time_limit_s: Optional[float] = None) -> T
         P = P_mask
         while P:
             colours += 1
-            v = (P & -P)
-            idx_v = v.bit_length()-1
+            v = (P & -P); idx_v = v.bit_length()-1
             X = ~adj[idx_v] & V_all
             P &= ~v
             while P:
-                w = (P & -P)
-                idx = w.bit_length()-1
+                w = (P & -P); idx = w.bit_length()-1
                 if (X >> idx) & 1:
                     X &= ~adj[idx]
                     P &= ~w
@@ -270,8 +273,7 @@ def _bbmc_max_cliques(adj: List[int], time_limit_s: Optional[float] = None) -> T
             best_u, best_deg = 0, -1
             tmp = U
             while tmp:
-                u_bit = (tmp & -tmp)
-                idx = u_bit.bit_length()-1
+                u_bit = (tmp & -tmp); idx = u_bit.bit_length()-1
                 deg = (P_mask & adj[idx]).bit_count()
                 if deg > best_deg:
                     best_u, best_deg = idx, deg
@@ -281,12 +283,9 @@ def _bbmc_max_cliques(adj: List[int], time_limit_s: Optional[float] = None) -> T
             candidates = P_mask
         tmp = candidates
         while tmp:
-            v_bit = (tmp & -tmp)
-            v = v_bit.bit_length()-1
+            v_bit = (tmp & -tmp); v = v_bit.bit_length()-1
             rec(R_mask | (1<<v), P_mask & adj[v], X_mask & adj[v])
-            P_mask &= ~v_bit
-            X_mask |= v_bit
-            tmp &= ~v_bit
+            P_mask &= ~v_bit; X_mask |= v_bit; tmp &= ~v_bit
 
     rec(0, V_all, 0)
     return best_size, best_masks
@@ -392,7 +391,6 @@ def _mcgregor_extend(m1: Chem.Mol, m2: Chem.Mol, seed: Dict[int,int],
 # --------------
 # Public facade
 # --------------
-
 @dataclass
 class _STD:
     largest_fragment: bool = True
@@ -414,39 +412,49 @@ class SMSD:
             if isinstance(x, Chem.Mol):
                 return (stdzr.run(x, **self.std_opts) if standardise else Chem.Mol(x)), False
             if isinstance(x, str):
-                is_smarts = any(ch in x for ch in "*[]$;@/\\!?")
-                m = Chem.MolFromSmarts(x) if is_smarts else Chem.MolFromSmiles(x)
-                if m is None: raise ValueError(f"Cannot parse input: {x}")
-                if is_smarts: return m, True
-                else: return (stdzr.run(m, **self.std_opts) if standardise else m), False
+                # Prefer SMILES when possible; fallback to SMARTS (with $name stripped for RDKit parsing)
+                m_smiles = Chem.MolFromSmiles(x)
+                if m_smiles is not None:
+                    return (stdzr.run(m_smiles, **self.std_opts) if standardise else m_smiles), False
+                # SMARTS path
+                sanitized = SmartsPattern.strip_named_predicates(x)
+                m_smarts = Chem.MolFromSmarts(sanitized)
+                if m_smarts is None:
+                    raise ValueError(f"Cannot parse input: {x}")
+                return m_smarts, True
             raise TypeError("Query/Target must be RDKit Mol or SMILES/SMARTS string.")
 
         self.q, self.query_is_smarts = _to_mol(query)
         self.t, _ = _to_mol(target)
 
-        # Sanitise only non‑SMARTS (SMARTS are never standardised/sanitised)
+        # Sanitise only non‑SMARTS (SMARTS are patterns; do not sanitise)
         if not self.query_is_smarts:
             Chem.SanitizeMol(self.q)
         Chem.SanitizeMol(self.t)
 
-        # SMARTS pattern + recursive $() binding
-        self.q_pattern = SmartsPattern(query, is_smarts=True) if (isinstance(query, str) and self.query_is_smarts) else None
+        # Bind recursive SMARTS if present on the original query string
+        if isinstance(query, str):
+            try:
+                qpat = SmartsPattern(query, is_smarts=True)
+            except Exception:
+                qpat = None
+            self.q_pattern = qpat
+        else:
+            self.q_pattern = None
+
         if self.q_pattern and self.q_pattern.rec_by_atom:
             vm = RecPredicateVM()
             # example built‑ins; customise as needed
             vm.register("isAmideN", smarts="N C(=O)")
             vm.register("isCarboxylC", smarts="C(=O)O")
             rec_specs = self.q_pattern.rec_by_atom
-
             def _rec_ok(qmol, tmol, qi, tj, _vm=vm, _specs=rec_specs):
                 specs = _specs.get(int(qi))
                 if not specs: return True
                 return _vm.eval_all_for_atom(tmol, int(tj), specs)
-
             self.chem = replace(self.chem, atom_rec_ok=_rec_ok)
 
     # ---- Convenience
-
     def _tan(self, m_atoms: int, m_bonds: int) -> Tuple[float,float]:
         a = m_atoms / max(1, (self.q.GetNumAtoms() + self.t.GetNumAtoms() - m_atoms))
         b = m_bonds / max(1, (self.q.GetNumBonds() + self.t.GetNumBonds() - m_bonds))
@@ -477,7 +485,6 @@ class SMSD:
         return True
 
     # ---- Substructure
-
     def substructure_exists(self, opt: SubstructureOptions = SubstructureOptions()) -> bool:
         if not self.subgraph_possible(): return False
         return bool(_vf2pp_search(self.q, self.t, self.chem, opt))
@@ -496,7 +503,6 @@ class SMSD:
         return out
 
     # ---- MCS
-
     def mcs_max(self, opt: MCSOptions = MCSOptions()) -> Optional[MatchResult]:
         nodes, adj = _build_modular_product(self.q, self.t, self.chem)
         if not nodes: return None

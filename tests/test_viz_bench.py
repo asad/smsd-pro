@@ -1,8 +1,4 @@
-\
-import os, json, time, math
-from rdkit import Chem
-from smsd_pro.engines import SMSD, SubstructureOptions, MCSOptions
-from smsd_pro.chem import ChemOptions
+import os
 from smsd_pro.viz import viz_compare_substructure_png, viz_compare_mcs_png, VizConfig
 
 OUT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "test_output")
