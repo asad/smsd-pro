@@ -1,47 +1,23 @@
-# SMSD Pro — BioInception PVT LTD
+# SMSD Pro
 
-**SMSD Pro** provides fast, RDKit-independent engines for:
+**SMSD Pro** is a compact, fast set of engines for **substructure search** and **maximum common substructure (MCS)** with rich, medicinal‑chemistry aware matching.
+It is independent of RDKit’s matching/FMCS implementations (we only use RDKit for molecule IO and chemistry metadata).
 
-- **Substructure search** (VF2++-style with terminal look-ahead, degree/ring pruning, options for chirality, bond stereo, ring and aromaticity controls).
-- **Maximum Common Substructure (MCS)** via an **exact** induced approach:
-  - Modular product + **bit-parallel clique (BBMC)** (Tomita-like pivot and sequential colouring bound).
-  - Optional **McGregor seed→extend** to further enlarge mappings under chemistry constraints.
-- SMARTS support (including E/Z handling through directional single propagation).
+> Highlights
+>
+> - Substructure: **VF2++** style backtracker with terminal look‑ahead, degree/ring pruning, stereo checks.
+> - MCS (MCIS/MCCS): **BBMC** (Tomita‑like) maximum clique on the modular product + **McGregor** seed→extend.
+> - **Recursive SMARTS `$()`** via a tiny cached predicate VM, *without touching the engines*.
+> - Strict/flexible aromaticity, ring‑only matching, ring size comparators, bond order modes, chirality and E/Z.
+> - Visualiser to export side‑by‑side PNGs comparing **SMSD vs RDKit** mappings.
+> - Benchmarks + 100 auto‑generated tests covering simple to very difficult cases.
 
-### Install
-
-```bash
-# Recommended: create an environment and install RDKit from conda-forge
-conda create -n smsd-pro -c conda-forge python=3.11 rdkit
-conda activate smsd-pro
-
-# Then install SMSD Pro
-pip install .
-```
-
-If you prefer pip-only and your platform has RDKit wheels:
-```bash
-pip install "rdkit-pypi>=2023.9.1"
-pip install .
-```
-
-### Quick start
-
-```python
-from smsd_pro.engines import SMSD, ChemOptions, SubstructureOptions, MCSOptions
-
-smsd = SMSD("c1ccccc1", "c1ccc2ccccc2c1")
-print("Substructure?", smsd.substructure_exists())
-
-m = smsd.mcs_max(MCSOptions(mcs_type="MCCS"))
-print("MCS size:", m.size if m else 0)
-```
-
-Command line:
+## Quick start
 
 ```bash
-smsd-pro --query "c1ccccc1" --target "c1ccc2ccccc2c1" --mode substructure
-smsd-pro --mol1 "CCCCCC" --mol2 "CCCCCCCC" --mode mcs --mcs-type MCIS
+pip install -e .[dev]
+pytest -q
+python -m smsd_pro.cli --help
 ```
 
-See **`docs/WHITEPAPER.md`** for algorithm details and citations, and **`tests/`** for 100+ checks.
+See `docs/WHITEPAPER.md` for an algorithmic overview.
