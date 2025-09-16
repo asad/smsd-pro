@@ -1,1 +1,0 @@
-# SMSD Pro – quick start\n\nSee tests and scripts/bench.py.\n

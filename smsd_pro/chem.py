@@ -1,4 +1,7 @@
-# smsd_pro/chem.py – chemistry utils, invariants, comparators and SMARTS extraction
+# SPDX-License-Identifier: Apache-2.0
+# © 2025 BioInception PVT LTD.
+\
+# smsd_pro/chem.py – chemistry utilities, invariants, comparators and SMARTS extraction
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional, Iterable, Set, Callable, Literal, Any
@@ -47,16 +50,34 @@ class Standardiser:
 # WL colours and ring caches
 # -----------------------------
 def _safe_total_valence(a: Chem.Atom) -> int:
+    """Return a conservative valence usable for query atoms without tripping RDKit preconditions.
+    - For SMARTS QueryAtom, avoid calling GetTotalValence() and return degree.
+    - Otherwise, try usual methods, sanitising if needed.
+    """
+    try:
+        if hasattr(a, "HasQuery") and a.HasQuery():
+            return int(a.GetDegree())
+    except Exception:
+        pass
     try:
         return int(a.GetTotalValence())
     except Exception:
         try:
-            # try to (re)sanitise owning mol once
             Chem.SanitizeMol(a.GetOwningMol(), catchErrors=True)
             return int(a.GetTotalValence())
         except Exception:
-            # last resort: degree + neighbour Hs
-            return int(a.GetDegree() + a.GetTotalNumHs(includeNeighbors=True))
+            return int(a.GetDegree())
+
+def _safe_total_hs(a: Chem.Atom) -> int:
+    try:
+        if hasattr(a, "HasQuery") and a.HasQuery():
+            return 0
+    except Exception:
+        pass
+    try:
+        return int(a.GetTotalNumHs(includeNeighbors=True))
+    except Exception:
+        return 0
 
 def _wl_colours(m: Chem.Mol, rounds: int = 2, include_chirality: bool = False) -> List[int]:
     N = int(m.GetNumAtoms())
@@ -67,9 +88,9 @@ def _wl_colours(m: Chem.Mol, rounds: int = 2, include_chirality: bool = False) -
             int(a.GetAtomicNum()),
             int(a.GetFormalCharge()),
             _safe_total_valence(a),
-            int(a.GetTotalNumHs(includeNeighbors=True)),
-            int(a.GetIsAromatic()),
-            int(a.IsInRing()),
+            _safe_total_hs(a),
+            int(a.GetIsAromatic()) if hasattr(a, "GetIsAromatic") else 0,
+            int(a.IsInRing()) if hasattr(a, "IsInRing") else 0,
             int(a.GetChiralTag()) if include_chirality else 0,
         )
         base.append(int.from_bytes(hashlib.blake2b("|".join(map(str, inv)).encode(),
@@ -84,7 +105,7 @@ def _wl_colours(m: Chem.Mol, rounds: int = 2, include_chirality: bool = False) -
         for i in range(N):
             neigh = sorted(cur[j] for j in adj[i])
             nxt.append(int.from_bytes(
-                hashlib.blake2b((str(cur[i])+";"+",".join(map(str, neigh))).encode(),
+                hashlib.blake2b((str(cur[i])+';'+','.join(map(str, neigh))).encode(),
                                 digest_size=4).digest(), "little"))
         cur = nxt
     return cur
@@ -125,14 +146,14 @@ class ChemOptions:
     match_isotope: bool = False
     match_formal_charge: bool = True
     match_valence: bool = False
-    aromaticity_mode: Literal["strict","flexible"] = "strict"
+    aromaticity_mode: Literal['strict','flexible'] = 'strict'
     ring_matches_ring_only: bool = True
     ring_fusion_strict: bool = False
-    ring_size_mode: Literal["exact","subset","ignore"] = "subset"
+    ring_size_mode: Literal['exact','subset','ignore'] = 'subset'
     ring_size_tolerance: int = 0
     # bond‑level
-    match_bond_order: Literal["strict","loose"] = "strict"
-    bond_stereo: Literal["off","defined","exact"] = "defined"
+    match_bond_order: Literal['strict','loose'] = 'strict'
+    bond_stereo: Literal['off','defined','exact'] = 'defined'
     # stereo tetrahedral
     use_chirality: bool = False
     # global
@@ -174,16 +195,13 @@ class SmartsPattern:
         while i < n:
             c = smarts[i]
             if c == '[':
-                # copy bracket content but drop $name
                 depth, j = 1, i+1
                 while j < n and depth > 0:
                     if smarts[j] == '[': depth += 1
                     elif smarts[j] == ']': depth -= 1
                     j += 1
                 content = smarts[i+1:j-1]
-                # remove $word not followed by '('
                 content = re.sub(r"\$[A-Za-z_]\w*(?!\s*\()", "", content)
-                # collapse multiple semicolons and trim
                 content = re.sub(r";{2,}", ";", content).strip(";")
                 out.append("[" + content + "]")
                 i = j
@@ -271,8 +289,6 @@ def _atoms_compatible(q: Chem.Atom, t: Chem.Atom, rc_q: RingCache, rc_t: RingCac
         if not C.atom_rec_ok(qmol, tmol, int(q.GetIdx()), int(t.GetIdx())): return False
     return True
 
-
-
 def _ring_size_ok_bond(qb: Chem.Bond, tb: Chem.Bond, rc_q: RingCache, rc_t: RingCache, C: ChemOptions) -> bool:
     if C.ring_size_mode == "ignore": return True
     q_sizes = rc_q.bond_ring_sizes.get(qb.GetIdx(), set())
@@ -287,14 +303,14 @@ def _ring_size_ok_bond(qb: Chem.Bond, tb: Chem.Bond, rc_q: RingCache, rc_t: Ring
                 return True
     return False
 
-def _bond_stereo_ok(qb: Chem.Bond, tb: Chem.Bond, mode: Literal["off","defined","exact"]) -> bool:
-    if mode == "off": return True
+def _bond_stereo_ok(qb: Chem.Bond, tb: Chem.Bond, mode: Literal['off','defined','exact']) -> bool:
+    if mode == 'off': return True
     if qb.GetBondType() != Chem.BondType.DOUBLE or tb.GetBondType() != Chem.BondType.DOUBLE:
         return True
     sQ, sT = qb.GetStereo(), tb.GetStereo()
-    if mode == "defined":
+    if mode == 'defined':
         return (sQ != Chem.BondStereo.STEREONONE) and (sT != Chem.BondStereo.STEREONONE)
-    if mode == "exact":
+    if mode == 'exact':
         if sQ == Chem.BondStereo.STEREOANY:
             return sT != Chem.BondStereo.STEREONONE
         return sQ == sT and sQ != Chem.BondStereo.STEREONONE
@@ -304,7 +320,7 @@ def _bonds_compatible(qb: Optional[Chem.Bond], tb: Optional[Chem.Bond], rc_q: Ri
     if (qb is None) != (tb is None): return False
     if qb is None: return True
     if C.ring_matches_ring_only and qb.IsInRing() and not tb.IsInRing(): return False
-    if C.match_bond_order == "strict":
+    if C.match_bond_order == 'strict':
         if qb.GetBondType() != tb.GetBondType(): return False
     else:
         if qb.GetBondType() != tb.GetBondType():

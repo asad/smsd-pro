@@ -4,13 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smsd-pro"
-version = "0.1.1"
-description = "SMSD Pro: fast substructure & MCS engines with rich chemistry (BioInception PVT LTD)"
-readme = "docs/README.md"
+version = "1.0.0"
+description = "SMSD-Pro: fast substructure & MCS engines with rich chemistry (BioInception PVT LTD)"
+readme = "README.md"
 requires-python = ">=3.9,<3.14"
-# Use SPDX license string to silence the deprecation warning:
-license = "MIT"
-authors = [{ name = "BioInception PVT LTD", email = "asad.rahman@bioinceptionlabs.com" }]
+license = "Apache-2.0"
+authors = [
+  { name = "Syed Asad Rahman", email = "asad.rahman@bioinceptionlabs.com" },
+  { name = "BioInception PVT LTD", email = "info@bioinceptionlabs.com" }
+]
 keywords = ["cheminformatics", "substructure", "MCS", "clique", "medchem", "SMSD", "RDKit"]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -29,5 +31,4 @@ Homepage = "https://github.com/asad/smsd-pro"
 rdkit = ["rdkit-pypi>=2025.03.1"]
 
 [tool.setuptools]
-packages = ["smsd_pro"]          # <— add this
-
+packages = ["smsd_pro"]

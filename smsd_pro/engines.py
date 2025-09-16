@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# © 2025 BioInception PVT LTD.
+\
 # smsd_pro/engines.py – VF2++ substructure, BBMC MCS, McGregor extend, and facade
 from __future__ import annotations
 from dataclasses import dataclass, replace
@@ -168,7 +171,7 @@ def _vf2pp_search(q: Chem.Mol, t: Chem.Mol, C: ChemOptions, opt: SubstructureOpt
             m = {i:int(st.q2t[i]) for i in range(st.Nq)}
             if C.complete_rings_only and not _mapping_has_complete_rings(q, t, m):
                 return False
-            key = tuple(sorted(m.values())) if opt.uniquify_mode=="target_set" else tuple(sorted(m.items()))
+            key = tuple(sorted(m.values())) if opt.uniquify_mode=='target_set' else tuple(sorted(m.items()))
             if key not in seen:
                 seen.add(key); results.append(m)
             return True
@@ -511,11 +514,14 @@ class SMSD:
         mapping = _mask_to_mapping(nodes, cliques[0])
         if opt.mcs_type == "MCCS":
             mapping = _largest_connected_in_query(self.q, mapping)
-        if opt.use_mcgregor_extend and mapping:
+        # IMPORTANT: McGregor extension calls WL colours and may consult valence/H counts.
+        # Query SMARTS can contain QueryAtom objects where these are undefined. To avoid
+        # RDKit precondition violations, we skip McGregor when the query is SMARTS.
+        if opt.use_mcgregor_extend and mapping and not self.query_is_smarts:
             mapping = _mcgregor_extend(self.q, self.t, mapping, self.chem, time_limit_s=opt.extend_time_limit_s)
         bonds_common = sum(1 for b in self.q.GetBonds()
                            if int(b.GetBeginAtomIdx()) in mapping and int(b.GetEndAtomIdx()) in mapping and
                            self.t.GetBondBetweenAtoms(int(mapping[int(b.GetBeginAtomIdx())]), int(mapping[int(b.GetEndAtomIdx())])) is not None)
         tana, tanb = self._tan(len(mapping), bonds_common)
-        algo = f"{opt.mcs_type}_CLIQUE_BBMC" + ("+MCG" if opt.use_mcgregor_extend else "")
+        algo = f"{opt.mcs_type}_CLIQUE_BBMC" + ("+MCG" if opt.use_mcgregor_extend and not self.query_is_smarts else "")
         return MatchResult(mapping, len(mapping), algo, tana, tanb)

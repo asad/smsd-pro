@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+# © 2025 BioInception PVT LTD.
+\
+# smsd_pro/smarts_vm.py – cached evaluator for recursive SMARTS $() and named predicates
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Tuple, List
@@ -9,8 +13,6 @@ class RecSpec:
     kind: str  # "smarts" or "name"
     expr: str
 
-from rdkit import Chem
-
 def _anchor_match_smartspattern(smarts: str, mol: Chem.Mol, atom_idx: int) -> bool:
     """Return True iff the first atom of SMARTS `smarts` maps to `atom_idx` in `mol`."""
     patt = Chem.MolFromSmarts(smarts)
@@ -20,7 +22,6 @@ def _anchor_match_smartspattern(smarts: str, mol: Chem.Mol, atom_idx: int) -> bo
         if match and match[0] == atom_idx:
             return True
     return False
-
 
 class RecPredicateVM:
     """Cached evaluator for recursive SMARTS $() and named $predicates."""

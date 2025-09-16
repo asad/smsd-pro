@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# © 2025 BioInception PVT LTD.
+\
 # smsd_pro/viz.py – side-by-side PNG comparison of SMSD vs RDKit
 from __future__ import annotations
 from dataclasses import dataclass

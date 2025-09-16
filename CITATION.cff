@@ -1,0 +1,39 @@
+cff-version: 1.2.0
+message: If you use this software, please cite it.
+title: SMSD Pro
+version: 1.0.0
+date-released: 2025-09-16
+type: software
+authors:
+  - family-names: Rahman
+    given-names: Syed Asad
+    affiliation: BioInception PVT LTD
+    orcid: https://orcid.org/0000-0000-0000-0000
+repository-code: https://github.com/asad/smsd-pro
+license: Apache-2.0
+preferred-citation:
+  type: software
+  title: SMSD Pro
+  authors:
+    - family-names: Rahman
+      given-names: Syed Asad
+  year: 2025
+references:
+  - type: article
+    title: Small Molecule Subgraph Detector (SMSD) toolkit
+    authors:
+      - family-names: Rahman
+        given-names: Syed Asad
+      - family-names: Bashton
+        given-names: Matthew
+      - family-names: Holliday
+        given-names: Gemma L.
+      - family-names: Schrader
+        given-names: Robert
+      - family-names: Thornton
+        given-names: Janet M.
+    journal: Journal of Cheminformatics
+    year: 2009
+    volume: "1"
+    pages: "12"
+    doi: 10.1186/1758-2946-1-12
