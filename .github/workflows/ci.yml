@@ -15,7 +15,7 @@ jobs:
       - name: Setup micromamba
         uses: mamba-org/setup-micromamba@v1
         with:
-          micromamba-version: "1.5.8"
+          micromamba-version: "1.5.8-0" # <-- Corrected version format
           environment-file: ""
           create-args: >-
             -n smsdpro
