@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # © 2025 BioInception PVT LTD.
-\
-# smsd_pro/chem.py – chemistry utilities, invariants, comparators and SMARTS extraction
+
+"""Chemistry helpers: standardisation, Weisfeiler–Lehman colours,
+ring caches, matching options, SMARTS parsing and recursive $() extraction."""
+
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional, Iterable, Set, Callable, Literal, Any
@@ -13,11 +15,16 @@ try:
 except Exception:
     from rdkit.Chem import rdMolStandardize  # type: ignore
 
+
 # ----------------
 # Standardisation
 # ----------------
 class Standardiser:
-    """Conservative standardisation for med‑chem use."""
+    """Conservative standardisation for med‑chem use.
+
+    Choice is intentionally mild so that substructure/MCS behaviour is predictable.
+
+    """
     def __init__(self):
         self._lfc = rdMolStandardize.LargestFragmentChooser()
         self._norm = rdMolStandardize.Normalizer()
@@ -46,15 +53,14 @@ class Standardiser:
         Chem.SanitizeMol(m)
         return m
 
+
 # -----------------------------
 # WL colours and ring caches
 # -----------------------------
 def _safe_total_valence(a: Chem.Atom) -> int:
-    """Return a conservative valence usable for query atoms without tripping RDKit preconditions.
-    - For SMARTS QueryAtom, avoid calling GetTotalValence() and return degree.
-    - Otherwise, try usual methods, sanitising if needed.
-    """
+    """Total valence that won't trigger precondition errors on QueryAtoms (SMARTS)."""
     try:
+        # Query atoms may not have computed valence; use degree as a safe proxy.
         if hasattr(a, "HasQuery") and a.HasQuery():
             return int(a.GetDegree())
     except Exception:
@@ -80,6 +86,7 @@ def _safe_total_hs(a: Chem.Atom) -> int:
         return 0
 
 def _wl_colours(m: Chem.Mol, rounds: int = 2, include_chirality: bool = False) -> List[int]:
+    """1-WL refinement colours robust to SMARTS pattern atoms."""
     N = int(m.GetNumAtoms())
     base: List[int] = []
     for i in range(N):
@@ -93,8 +100,9 @@ def _wl_colours(m: Chem.Mol, rounds: int = 2, include_chirality: bool = False) -
             int(a.IsInRing()) if hasattr(a, "IsInRing") else 0,
             int(a.GetChiralTag()) if include_chirality else 0,
         )
-        base.append(int.from_bytes(hashlib.blake2b("|".join(map(str, inv)).encode(),
-                                                  digest_size=4).digest(), "little"))
+        base.append(int.from_bytes(
+            hashlib.blake2b("|".join(map(str, inv)).encode(), digest_size=4).digest(), "little"
+        ))
     adj = [[] for _ in range(N)]
     for b in m.GetBonds():
         i, j = int(b.GetBeginAtomIdx()), int(b.GetEndAtomIdx())
@@ -105,10 +113,11 @@ def _wl_colours(m: Chem.Mol, rounds: int = 2, include_chirality: bool = False) -
         for i in range(N):
             neigh = sorted(cur[j] for j in adj[i])
             nxt.append(int.from_bytes(
-                hashlib.blake2b((str(cur[i])+';'+','.join(map(str, neigh))).encode(),
+                hashlib.blake2b((str(cur[i])+";"+",".join(map(str, neigh))).encode(),
                                 digest_size=4).digest(), "little"))
         cur = nxt
     return cur
+
 
 class RingCache:
     """Rings per atom and per bond, plus ring sizes, cached once per molecule."""
@@ -136,6 +145,7 @@ class RingCache:
                 atoms = set(ring)
                 for ai in atoms: self.atom_ring_count[ai] += 1
 
+
 # -------------------------
 # Chemistry match options
 # -------------------------
@@ -146,14 +156,14 @@ class ChemOptions:
     match_isotope: bool = False
     match_formal_charge: bool = True
     match_valence: bool = False
-    aromaticity_mode: Literal['strict','flexible'] = 'strict'
+    aromaticity_mode: Literal["strict","flexible"] = "strict"
     ring_matches_ring_only: bool = True
     ring_fusion_strict: bool = False
-    ring_size_mode: Literal['exact','subset','ignore'] = 'subset'
+    ring_size_mode: Literal["exact","subset","ignore"] = "subset"
     ring_size_tolerance: int = 0
     # bond‑level
-    match_bond_order: Literal['strict','loose'] = 'strict'
-    bond_stereo: Literal['off','defined','exact'] = 'defined'
+    match_bond_order: Literal["strict","loose"] = "strict"
+    bond_stereo: Literal["off","defined","exact"] = "defined"
     # stereo tetrahedral
     use_chirality: bool = False
     # global
@@ -163,6 +173,7 @@ class ChemOptions:
     # hook for recursive SMARTS
     atom_rec_ok: Optional[Callable[[Chem.Mol, Chem.Mol, int, int], bool]] = None
 
+
 # ----------------
 # SMARTS extractor
 # ----------------
@@ -170,6 +181,7 @@ class ChemOptions:
 class RecSpec:
     kind: str  # "smarts" or "name"
     expr: str
+
 
 class SmartsPattern:
     """Extract constraints and $() per atom. Uses RDKit for topology; we strip $name first."""
@@ -201,7 +213,9 @@ class SmartsPattern:
                     elif smarts[j] == ']': depth -= 1
                     j += 1
                 content = smarts[i+1:j-1]
+                # remove $word not followed by '('
                 content = re.sub(r"\$[A-Za-z_]\w*(?!\s*\()", "", content)
+                # collapse multiple semicolons and trim
                 content = re.sub(r";{2,}", ";", content).strip(";")
                 out.append("[" + content + "]")
                 i = j
@@ -267,6 +281,7 @@ class SmartsPattern:
             i += 1
         return out
 
+
 # -------------------------
 # Atom & bond comparators
 # -------------------------
@@ -289,6 +304,7 @@ def _atoms_compatible(q: Chem.Atom, t: Chem.Atom, rc_q: RingCache, rc_t: RingCac
         if not C.atom_rec_ok(qmol, tmol, int(q.GetIdx()), int(t.GetIdx())): return False
     return True
 
+
 def _ring_size_ok_bond(qb: Chem.Bond, tb: Chem.Bond, rc_q: RingCache, rc_t: RingCache, C: ChemOptions) -> bool:
     if C.ring_size_mode == "ignore": return True
     q_sizes = rc_q.bond_ring_sizes.get(qb.GetIdx(), set())
@@ -303,29 +319,79 @@ def _ring_size_ok_bond(qb: Chem.Bond, tb: Chem.Bond, rc_q: RingCache, rc_t: Ring
                 return True
     return False
 
-def _bond_stereo_ok(qb: Chem.Bond, tb: Chem.Bond, mode: Literal['off','defined','exact']) -> bool:
-    if mode == 'off': return True
+
+def _bond_stereo_ok(qb: Chem.Bond, tb: Chem.Bond, mode: Literal["off","defined","exact"]) -> bool:
+    if mode == "off": return True
     if qb.GetBondType() != Chem.BondType.DOUBLE or tb.GetBondType() != Chem.BondType.DOUBLE:
         return True
     sQ, sT = qb.GetStereo(), tb.GetStereo()
-    if mode == 'defined':
+    if mode == "defined":
         return (sQ != Chem.BondStereo.STEREONONE) and (sT != Chem.BondStereo.STEREONONE)
-    if mode == 'exact':
+    if mode == "exact":
         if sQ == Chem.BondStereo.STEREOANY:
             return sT != Chem.BondStereo.STEREONONE
         return sQ == sT and sQ != Chem.BondStereo.STEREONONE
     return True
 
+
 def _bonds_compatible(qb: Optional[Chem.Bond], tb: Optional[Chem.Bond], rc_q: RingCache, rc_t: RingCache, C: ChemOptions) -> bool:
     if (qb is None) != (tb is None): return False
     if qb is None: return True
     if C.ring_matches_ring_only and qb.IsInRing() and not tb.IsInRing(): return False
-    if C.match_bond_order == 'strict':
+    # bond order comparison
+    if C.match_bond_order == "strict":
         if qb.GetBondType() != tb.GetBondType(): return False
     else:
-        if qb.GetBondType() != tb.GetBondType():
-            if not (qb.GetIsAromatic() and tb.GetIsAromatic()): return False
-    if qb.IsInRing() and tb.IsInRing():
-        if not _ring_size_ok_bond(qb, tb, rc_q, rc_t, C): return False
+        # loose: treat aromatic as compatible with single/double; allow single<->double in aromatic systems
+        if qb.GetBondType() == tb.GetBondType():
+            pass
+        elif qb.GetIsAromatic() and tb.GetIsAromatic():
+            pass
+        elif qb.GetIsAromatic() and tb.GetBondType() in (Chem.BondType.SINGLE, Chem.BondType.DOUBLE):
+            pass
+        elif tb.GetIsAromatic() and qb.GetBondType() in (Chem.BondType.SINGLE, Chem.BondType.DOUBLE):
+            pass
+        else:
+            return False
+    if not _ring_size_ok_bond(qb, tb, rc_q, rc_t, C): return False
     if not _bond_stereo_ok(qb, tb, C.bond_stereo): return False
     return True
+
+
+# -------------------------
+# RDKit-compatibility presets
+# -------------------------
+def rdkit_substructure_profile(*, use_chirality: bool = False) -> ChemOptions:
+    """Approximate RDKit SubstructMatch behaviour (aromatic/kekulé tolerant)."""
+    return ChemOptions(
+        match_atom_type=True,
+        match_isotope=False,
+        match_formal_charge=True,
+        match_valence=False,
+        aromaticity_mode="flexible",
+        ring_matches_ring_only=True,
+        ring_fusion_strict=False,
+        ring_size_mode="subset",
+        ring_size_tolerance=1,
+        match_bond_order="loose",
+        bond_stereo="defined" if use_chirality else "off",
+        use_chirality=use_chirality,
+    )
+
+
+def rdkit_fmcs_profile() -> ChemOptions:
+    """Parameters roughly matching RDKit FMCS defaults for like‑for‑like comparisons."""
+    return ChemOptions(
+        match_atom_type=True,
+        match_isotope=False,
+        match_formal_charge=True,
+        match_valence=False,
+        aromaticity_mode="flexible",
+        ring_matches_ring_only=True,
+        ring_fusion_strict=False,
+        ring_size_mode="subset",
+        ring_size_tolerance=1,
+        match_bond_order="loose",
+        bond_stereo="off",
+        use_chirality=False,
+    )

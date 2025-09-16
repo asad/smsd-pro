@@ -1,17 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
 # © 2025 BioInception PVT LTD.
-\
-# smsd_pro/smarts_vm.py – cached evaluator for recursive SMARTS $() and named predicates
+
+"""Evaluator for recursive SMARTS predicates: both $name and $(SMARTS) blocks.
+
+We anchor $(SMARTS) so the first atom in the pattern must map to the candidate atom.
+
+Named predicates can be registered either as functions or as SMARTS strings.
+
+"""
+
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Tuple, List
 from functools import lru_cache
 from rdkit import Chem
 
+
 @dataclass(frozen=True)
 class RecSpec:
     kind: str  # "smarts" or "name"
     expr: str
+
 
 def _anchor_match_smartspattern(smarts: str, mol: Chem.Mol, atom_idx: int) -> bool:
     """Return True iff the first atom of SMARTS `smarts` maps to `atom_idx` in `mol`."""
@@ -22,6 +31,7 @@ def _anchor_match_smartspattern(smarts: str, mol: Chem.Mol, atom_idx: int) -> bo
         if match and match[0] == atom_idx:
             return True
     return False
+
 
 class RecPredicateVM:
     """Cached evaluator for recursive SMARTS $() and named $predicates."""

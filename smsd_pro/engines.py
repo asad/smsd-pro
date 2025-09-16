@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # © 2025 BioInception PVT LTD.
-\
-# smsd_pro/engines.py – VF2++ substructure, BBMC MCS, McGregor extend, and facade
+
+"""Core engines: VF2++ substructure, modular-product + BBMC MCS, optional McGregor extension,
+and a friendly SMSD facade that exposes RDKit‑like options.
+"""
+
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Dict, List, Tuple, Optional, Iterable, Set, Callable, Literal, Any
@@ -12,7 +15,8 @@ from rdkit import Chem
 from .chem import (
     ChemOptions, Standardiser, RingCache, _atoms_compatible, _bonds_compatible, _wl_colours, SmartsPattern
 )
-from .smarts_vm import RecPredicateVM, RecSpec
+from .smarts_vm import RecPredicateVM
+
 
 # ----------------------------
 # Public option dataclasses
@@ -20,7 +24,7 @@ from .smarts_vm import RecPredicateVM, RecSpec
 @dataclass(frozen=True)
 class SubstructureOptions:
     engine: Literal["AUTO", "VF2PP"] = "AUTO"
-    connected_only: bool = True
+    connected_only: bool = True  # only choose from the connected frontier (default RDKit-like)
     induced: bool = False
     wl_rounds: int = 0
     time_limit_s: Optional[float] = 5.0
@@ -28,12 +32,15 @@ class SubstructureOptions:
     seed: Optional[int] = 0
     uniquify_mode: Literal["mapping","target_set"] = "target_set"
 
+
 @dataclass(frozen=True)
 class MCSOptions:
-    mcs_type: Literal["MCIS","MCCS"] = "MCIS"
+    mcs_type: Literal["MCIS","MCCS"] = "MCCS"  # default to connected common subgraph (chemist‑friendly)
+    connected_only: bool = True                      # drop to largest connected component if True
     time_limit_s: Optional[float] = 10.0
     use_mcgregor_extend: bool = True
     extend_time_limit_s: Optional[float] = 3.0
+
 
 @dataclass(frozen=True)
 class MatchResult:
@@ -42,6 +49,7 @@ class MatchResult:
     algorithm: str
     tanimoto_atoms: Optional[float] = None
     tanimoto_bonds: Optional[float] = None
+
 
 # --------------------
 # VF2++ state machine
@@ -110,6 +118,7 @@ class _VF2PPState:
                     if not _bonds_compatible(qb, tb, self.rc_q, self.rc_t, self.C):
                         ok = False; break
             if not ok: continue
+            # degree/terminality look‑ahead
             q_term = sum(1 for u in self.QN[i] if self.q2t[u]==-1 and self.qterm[u]>0)
             q_new  = sum(1 for u in self.QN[i] if self.q2t[u]==-1 and self.qterm[u]==0)
             t_term = sum(1 for v in self.TN[j] if self.t2q[v]==-1 and self.tterm[v]>0)
@@ -132,6 +141,7 @@ class _VF2PPState:
                 best, best_cnt, best_key = i, cnt, key
         return best
 
+
 # --------------
 # Search helpers
 # --------------
@@ -140,11 +150,10 @@ def _mapping_has_complete_rings(q: Chem.Mol, t: Chem.Mol, m: Dict[int,int]) -> b
     mapped_pairs = {(qi, qj): (m[qi], m[qj]) for b in q.GetBonds()
                     for qi,qj in [(b.GetBeginAtomIdx(), b.GetEndAtomIdx())]
                     if qi in m and qj in m}
-    t_bond_set = set()
     for (qi,qj),(ti,tj) in mapped_pairs.items():
         b = t.GetBondBetweenAtoms(ti, tj)
         if b is None: return False
-        t_bond_set.add(b.GetIdx())
+    # each ring in q that's partially mapped must correspond to a full ring in t
     for ring in rc_q.bond_rings:
         mapped_bonds = []
         for bi in ring:
@@ -157,6 +166,7 @@ def _mapping_has_complete_rings(q: Chem.Mol, t: Chem.Mol, m: Dict[int,int]) -> b
         if mapped_bonds and not any(set(mapped_bonds).issubset(R) for R in rc_t.bond_rings):
             return False
     return True
+
 
 def _vf2pp_search(q: Chem.Mol, t: Chem.Mol, C: ChemOptions, opt: SubstructureOptions) -> List[Dict[int,int]]:
     st = _VF2PPState(q, t, C)
@@ -171,7 +181,7 @@ def _vf2pp_search(q: Chem.Mol, t: Chem.Mol, C: ChemOptions, opt: SubstructureOpt
             m = {i:int(st.q2t[i]) for i in range(st.Nq)}
             if C.complete_rings_only and not _mapping_has_complete_rings(q, t, m):
                 return False
-            key = tuple(sorted(m.values())) if opt.uniquify_mode=='target_set' else tuple(sorted(m.items()))
+            key = tuple(sorted(m.values())) if opt.uniquify_mode=="target_set" else tuple(sorted(m.items()))
             if key not in seen:
                 seen.add(key); results.append(m)
             return True
@@ -201,6 +211,7 @@ def _vf2pp_search(q: Chem.Mol, t: Chem.Mol, C: ChemOptions, opt: SubstructureOpt
     rec()
     return results
 
+
 # ------------------------
 # MCS via modular product
 # ------------------------
@@ -208,6 +219,7 @@ def _vf2pp_search(q: Chem.Mol, t: Chem.Mol, C: ChemOptions, opt: SubstructureOpt
 class _MPNode:
     qi: int
     tj: int
+
 
 def _build_modular_product(m1: Chem.Mol, m2: Chem.Mol, C: ChemOptions) -> Tuple[List[_MPNode], List[int]]:
     rc1, rc2 = RingCache(m1), RingCache(m2)
@@ -235,6 +247,7 @@ def _build_modular_product(m1: Chem.Mol, m2: Chem.Mol, C: ChemOptions) -> Tuple[
                 if (qb is None) and (tb is None):
                     adj[u] |= (1<<v); adj[v] |= (1<<u)
     return nodes, adj
+
 
 def _bbmc_max_cliques(adj: List[int], time_limit_s: Optional[float] = None) -> Tuple[int, List[int]]:
     start = time.time()
@@ -293,6 +306,7 @@ def _bbmc_max_cliques(adj: List[int], time_limit_s: Optional[float] = None) -> T
     rec(0, V_all, 0)
     return best_size, best_masks
 
+
 def _mask_to_mapping(nodes: List[_MPNode], mask: int) -> Dict[int,int]:
     m: Dict[int,int] = {}
     while mask:
@@ -302,6 +316,7 @@ def _mask_to_mapping(nodes: List[_MPNode], mask: int) -> Dict[int,int]:
         m[int(n.qi)] = int(n.tj)
         mask &= ~v_bit
     return dict(sorted(m.items()))
+
 
 def _largest_connected_in_query(q: Chem.Mol, mapping: Dict[int,int]) -> Dict[int,int]:
     if not mapping: return mapping
@@ -324,6 +339,7 @@ def _largest_connected_in_query(q: Chem.Mol, mapping: Dict[int,int]) -> Dict[int
     root = max(cnt.items(), key=lambda kv: kv[1])[0]
     keep = {mapped[i] for i in range(len(mapped)) if find(i)==root}
     return {qi:mapping[qi] for qi in sorted(keep)}
+
 
 def _mcgregor_extend(m1: Chem.Mol, m2: Chem.Mol, seed: Dict[int,int],
                      C: ChemOptions, time_limit_s: Optional[float]=None) -> Dict[int,int]:
@@ -391,6 +407,7 @@ def _mcgregor_extend(m1: Chem.Mol, m2: Chem.Mol, seed: Dict[int,int],
     rec(dict(seed))
     return best
 
+
 # --------------
 # Public facade
 # --------------
@@ -403,8 +420,13 @@ class _STD:
     canonical_tautomer: bool = True
     kekulise: bool = False
 
+
 class SMSD:
-    """Friendly facade around the engines + chemistry options."""
+    """Friendly facade around the engines + chemistry options.
+
+    Defaults: connected mapping, conservative chemistry, standardised inputs.
+
+    """
     def __init__(self, query: Any, target: Any, *, chem: ChemOptions = ChemOptions(),
                  standardise: bool = True, std: Optional[Dict[str,Any]] = None):
         self.chem = chem
@@ -447,7 +469,7 @@ class SMSD:
 
         if self.q_pattern and self.q_pattern.rec_by_atom:
             vm = RecPredicateVM()
-            # example built‑ins; customise as needed
+            # Example built‑ins; projects can register more in client code
             vm.register("isAmideN", smarts="N C(=O)")
             vm.register("isCarboxylC", smarts="C(=O)O")
             rec_specs = self.q_pattern.rec_by_atom
@@ -512,16 +534,21 @@ class SMSD:
         best_size, cliques = _bbmc_max_cliques(adj, time_limit_s=opt.time_limit_s)
         if best_size == 0 or not cliques: return None
         mapping = _mask_to_mapping(nodes, cliques[0])
-        if opt.mcs_type == "MCCS":
+        if opt.mcs_type == "MCCS" or opt.connected_only:
             mapping = _largest_connected_in_query(self.q, mapping)
-        # IMPORTANT: McGregor extension calls WL colours and may consult valence/H counts.
-        # Query SMARTS can contain QueryAtom objects where these are undefined. To avoid
-        # RDKit precondition violations, we skip McGregor when the query is SMARTS.
+
+        # McGregor extension uses WL colours that query valence/H counts.
+        # On SMARTS/pattern queries those may be undefined → RDKit precondition.
+        # Skip the extension when the query is SMARTS; the clique MCS remains valid.
         if opt.use_mcgregor_extend and mapping and not self.query_is_smarts:
             mapping = _mcgregor_extend(self.q, self.t, mapping, self.chem, time_limit_s=opt.extend_time_limit_s)
+            if opt.mcs_type == "MCCS" or opt.connected_only:
+                mapping = _largest_connected_in_query(self.q, mapping)
+
+        # compute tanimoto vs original inputs
         bonds_common = sum(1 for b in self.q.GetBonds()
                            if int(b.GetBeginAtomIdx()) in mapping and int(b.GetEndAtomIdx()) in mapping and
                            self.t.GetBondBetweenAtoms(int(mapping[int(b.GetBeginAtomIdx())]), int(mapping[int(b.GetEndAtomIdx())])) is not None)
         tana, tanb = self._tan(len(mapping), bonds_common)
-        algo = f"{opt.mcs_type}_CLIQUE_BBMC" + ("+MCG" if opt.use_mcgregor_extend and not self.query_is_smarts else "")
-        return MatchResult(mapping, len(mapping), algo, tana, tanb)
+        return MatchResult(mapping, len(mapping), f"{'MCCS' if (opt.mcs_type=='MCCS' or opt.connected_only) else 'MCIS'}_CLIQUE_BBMC+{'MCG' if (opt.use_mcgregor_extend and not self.query_is_smarts) else 'BASE'}",
+                           tana, tanb)
