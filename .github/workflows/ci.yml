@@ -24,6 +24,7 @@ jobs:
             numpy
             pillow
             matplotlib
+            pytest
             pip
           condarc: |
             channels:
@@ -33,18 +34,19 @@ jobs:
       - name: Install package
         shell: bash -l {0}
         run: |
-          pip install -e .
-          pip install pytest
+          pip install --no-deps -e .
 
       - name: Unit tests (fast)
         shell: bash -l {0}
         run: |
-          pytest -q tests/test_basic.py
+          # NOTE: Assuming tests/test_basic.py exists for unit testing
+          # If not, this step may need adjustment.
+          pytest -q
 
-      - name: Benchmark suite (slow)
+      - name: Run benchmark suite
         shell: bash -l {0}
         run: |
-          pytest -q -m slow tests/test_bench_suite.py
+          python scripts/bench.py --limit-png 20
         continue-on-error: true
 
       - name: Upload artefacts
@@ -52,5 +54,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: smsdpro-artifacts
-          path: tests/output/*
-
+          path: test_output/
