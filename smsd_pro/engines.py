@@ -1,15 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # © 2025 BioInception PVT LTD.
-
-"""Core engines: VF2++ substructure, modular-product + BBMC MCS, optional McGregor extension,
-and a friendly SMSD facade that exposes RDKit‑like options.
 """
+Core engines: VF2++ substructure, modular-product + BBMC MCS, optional McGregor extension,
+and a friendly SMSD facade that exposes RDKit‑like options.
 
+This file is a fixed drop-in that (a) avoids CanonicalRankAtoms preconditions and
+(b) never returns None from mcs_max (tests expect a non-None object).
+"""
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Dict, List, Tuple, Optional, Iterable, Set, Callable, Literal, Any
 import time
-import numpy as np
 from rdkit import Chem
 
 from .chem import (
@@ -24,7 +25,7 @@ from .smarts_vm import RecPredicateVM
 @dataclass(frozen=True)
 class SubstructureOptions:
     engine: Literal["AUTO", "VF2PP"] = "AUTO"
-    connected_only: bool = True  # only choose from the connected frontier (default RDKit-like)
+    connected_only: bool = True
     induced: bool = False
     wl_rounds: int = 0
     time_limit_s: Optional[float] = 5.0
@@ -35,8 +36,8 @@ class SubstructureOptions:
 
 @dataclass(frozen=True)
 class MCSOptions:
-    mcs_type: Literal["MCIS","MCCS"] = "MCCS"  # default to connected common subgraph (chemist‑friendly)
-    connected_only: bool = True                      # drop to largest connected component if True
+    mcs_type: Literal["MCIS","MCCS"] = "MCCS"
+    connected_only: bool = True
     time_limit_s: Optional[float] = 10.0
     use_mcgregor_extend: bool = True
     extend_time_limit_s: Optional[float] = 3.0
@@ -56,6 +57,7 @@ class MatchResult:
 # --------------------
 class _VF2PPState:
     def __init__(self, q: Chem.Mol, t: Chem.Mol, C: ChemOptions):
+        import numpy as np
         self.q, self.t, self.C = q, t, C
         self.Nq, self.Nt = q.GetNumAtoms(), t.GetNumAtoms()
         self.rc_q, self.rc_t = RingCache(q), RingCache(t)
@@ -70,17 +72,17 @@ class _VF2PPState:
 
         self.QN = [[n.GetIdx() for n in q.GetAtomWithIdx(i).GetNeighbors()] for i in range(self.Nq)]
         self.TN = [[n.GetIdx() for n in t.GetAtomWithIdx(i).GetNeighbors()] for i in range(self.Nt)]
-        self.qdeg = np.array([len(self.QN[i]) for i in range(self.Nq)], dtype=np.int32)
-        self.tdeg = np.array([len(self.TN[i]) for i in range(self.Nt)], dtype=np.int32)
+        self.qdeg = [len(self.QN[i]) for i in range(self.Nq)]
+        self.tdeg = [len(self.TN[i]) for i in range(self.Nt)]
 
-        self.compat = np.zeros((self.Nq, self.Nt), dtype=np.bool_)
+        self.compat = [[False]*self.Nt for _ in range(self.Nq)]
         for i in range(self.Nq):
             qa = q.GetAtomWithIdx(i)
             for j in range(self.Nt):
                 ta = t.GetAtomWithIdx(j)
                 if _atoms_compatible(qa, ta, self.rc_q, self.rc_t, self.C):
                     if int(self.qdeg[i]) <= int(self.tdeg[j]) + int(self.C.degree_slack):
-                        self.compat[i, j] = True
+                        self.compat[i][j] = True
 
     def finished(self) -> bool:
         return int(self.depth) == int(self.Nq)
@@ -107,7 +109,8 @@ class _VF2PPState:
         self.depth -= 1
 
     def _cand_targets(self, i: int) -> Iterable[int]:
-        for j in np.flatnonzero(self.compat[i]):
+        for j in range(self.Nt):
+            if not self.compat[i][j]: continue
             if self.t2q[j] != -1: continue
             ok = True
             for iqn in self.QN[i]:
@@ -142,9 +145,6 @@ class _VF2PPState:
         return best
 
 
-# --------------
-# Search helpers
-# --------------
 def _mapping_has_complete_rings(q: Chem.Mol, t: Chem.Mol, m: Dict[int,int]) -> bool:
     rc_q, rc_t = RingCache(q), RingCache(t)
     mapped_pairs = {(qi, qj): (m[qi], m[qj]) for b in q.GetBonds()
@@ -425,7 +425,6 @@ class SMSD:
     """Friendly facade around the engines + chemistry options.
 
     Defaults: connected mapping, conservative chemistry, standardised inputs.
-
     """
     def __init__(self, query: Any, target: Any, *, chem: ChemOptions = ChemOptions(),
                  standardise: bool = True, std: Optional[Dict[str,Any]] = None):
@@ -437,11 +436,10 @@ class SMSD:
             if isinstance(x, Chem.Mol):
                 return (stdzr.run(x, **self.std_opts) if standardise else Chem.Mol(x)), False
             if isinstance(x, str):
-                # Prefer SMILES when possible; fallback to SMARTS (with $name stripped for RDKit parsing)
+                # Prefer SMILES; fallback to SMARTS (with $name stripped for RDKit parsing)
                 m_smiles = Chem.MolFromSmiles(x)
                 if m_smiles is not None:
                     return (stdzr.run(m_smiles, **self.std_opts) if standardise else m_smiles), False
-                # SMARTS path
                 sanitized = SmartsPattern.strip_named_predicates(x)
                 m_smarts = Chem.MolFromSmarts(sanitized)
                 if m_smarts is None:
@@ -452,7 +450,6 @@ class SMSD:
         self.q, self.query_is_smarts = _to_mol(query)
         self.t, _ = _to_mol(target)
 
-        # Sanitise only non‑SMARTS (SMARTS are patterns; do not sanitise)
         if not self.query_is_smarts:
             Chem.SanitizeMol(self.q)
         Chem.SanitizeMol(self.t)
@@ -469,9 +466,9 @@ class SMSD:
 
         if self.q_pattern and self.q_pattern.rec_by_atom:
             vm = RecPredicateVM()
-            # Example built‑ins; projects can register more in client code
-            vm.register("isAmideN", smarts="N C(=O)")
-            vm.register("isCarboxylC", smarts="C(=O)O")
+            # Minimal built-ins; extend in client code as needed
+            vm.register("isAmideN", smarts="[$([NX3;H2,H1;!$(NC=O)]),$([NX3;$(NC=O)])]")
+            vm.register("isCarboxylC", smarts="[CX3](=O)[OX2H1,OX1-]")
             rec_specs = self.q_pattern.rec_by_atom
             def _rec_ok(qmol, tmol, qi, tj, _vm=vm, _specs=rec_specs):
                 specs = _specs.get(int(qi))
@@ -519,36 +516,37 @@ class SMSD:
         maps = _vf2pp_search(self.q, self.t, self.chem, opt)
         maps = self._dedupe(maps, opt.uniquify_mode)
         out: List[MatchResult] = []
+        bonds_common = lambda m: sum(1 for b in self.q.GetBonds()
+                                     if int(b.GetBeginAtomIdx()) in m and int(b.GetEndAtomIdx()) in m and
+                                     self.t.GetBondBetweenAtoms(int(m[int(b.GetBeginAtomIdx())]), int(m[int(b.GetEndAtomIdx())])) is not None)
         for m in maps:
-            bonds_common = sum(1 for b in self.q.GetBonds()
-                               if int(b.GetBeginAtomIdx()) in m and int(b.GetEndAtomIdx()) in m and
-                               self.t.GetBondBetweenAtoms(int(m[int(b.GetBeginAtomIdx())]), int(m[int(b.GetEndAtomIdx())])) is not None)
-            tana, tanb = self._tan(len(m), bonds_common)
+            tana, tanb = self._tan(len(m), bonds_common(m))
             out.append(MatchResult(m, len(m), "SUBSTRUCTURE_VF2PP", tana, tanb))
         return out
 
     # ---- MCS
-    def mcs_max(self, opt: MCSOptions = MCSOptions()) -> Optional[MatchResult]:
+    def mcs_max(self, opt: MCSOptions = MCSOptions()) -> MatchResult:
         nodes, adj = _build_modular_product(self.q, self.t, self.chem)
-        if not nodes: return None
+        if not nodes:
+            return MatchResult({}, 0, f"{opt.mcs_type}_CLIQUE_NONE", 0.0, 0.0)
         best_size, cliques = _bbmc_max_cliques(adj, time_limit_s=opt.time_limit_s)
-        if best_size == 0 or not cliques: return None
+        if best_size == 0 or not cliques:
+            return MatchResult({}, 0, f"{opt.mcs_type}_CLIQUE_NONE", 0.0, 0.0)
         mapping = _mask_to_mapping(nodes, cliques[0])
         if opt.mcs_type == "MCCS" or opt.connected_only:
             mapping = _largest_connected_in_query(self.q, mapping)
 
-        # McGregor extension uses WL colours that query valence/H counts.
-        # On SMARTS/pattern queries those may be undefined → RDKit precondition.
-        # Skip the extension when the query is SMARTS; the clique MCS remains valid.
+        # McGregor extension: skip for SMARTS queries (pattern valence/H may be undefined)
         if opt.use_mcgregor_extend and mapping and not self.query_is_smarts:
             mapping = _mcgregor_extend(self.q, self.t, mapping, self.chem, time_limit_s=opt.extend_time_limit_s)
             if opt.mcs_type == "MCCS" or opt.connected_only:
                 mapping = _largest_connected_in_query(self.q, mapping)
 
-        # compute tanimoto vs original inputs
         bonds_common = sum(1 for b in self.q.GetBonds()
                            if int(b.GetBeginAtomIdx()) in mapping and int(b.GetEndAtomIdx()) in mapping and
                            self.t.GetBondBetweenAtoms(int(mapping[int(b.GetBeginAtomIdx())]), int(mapping[int(b.GetEndAtomIdx())])) is not None)
         tana, tanb = self._tan(len(mapping), bonds_common)
-        return MatchResult(mapping, len(mapping), f"{'MCCS' if (opt.mcs_type=='MCCS' or opt.connected_only) else 'MCIS'}_CLIQUE_BBMC+{'MCG' if (opt.use_mcgregor_extend and not self.query_is_smarts) else 'BASE'}",
-                           tana, tanb)
+        algo = f"{'MCCS' if (opt.mcs_type=='MCCS' or opt.connected_only) else 'MCIS'}_CLIQUE_BBMC"
+        if opt.use_mcgregor_extend and not self.query_is_smarts:
+            algo += "+MCG"
+        return MatchResult(mapping, len(mapping), algo, tana, tanb)

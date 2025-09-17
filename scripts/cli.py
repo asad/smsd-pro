@@ -19,9 +19,9 @@ from rdkit import Chem
 from rdkit import RDLogger
 RDLogger.DisableLog('rdApp.error')  # keep CLI clean
 
-from smsd_pro.engines import SMSD, SubstructureOptions, MCSOptions  # fileciteturn4file28
-from smsd_pro.chem import ChemOptions  # fileciteturn4file38
-from smsd_pro.viz import viz_compare_substructure_png, viz_compare_mcs_png, VizConfig  # fileciteturn4file48
+from smsd_pro.engines import SMSD, SubstructureOptions, MCSOptions
+from smsd_pro.chem import ChemOptions
+from smsd_pro.viz import viz_compare_substructure_png, viz_compare_mcs_png, VizConfig
 
 # ----------------------
 # Helpers / calculations
@@ -56,7 +56,6 @@ def profile(name: str) -> Tuple[str, ChemOptions]:
             use_chirality=False,
         )
     if n in ("rdkit-substruct", "rdkit"):
-        # Close to RDKit substructure defaults
         return "rdkit-substruct", ChemOptions(
             aromaticity_mode="strict",
             match_bond_order="strict",
@@ -65,7 +64,6 @@ def profile(name: str) -> Tuple[str, ChemOptions]:
             use_chirality=False,
         )
     if n in ("rdkit-fmcs", "fmcs"):
-        # Approximate RDKit FMCS defaults for like‑for‑like comparisons
         return "rdkit-fmcs", ChemOptions(
             aromaticity_mode="flexible",
             match_bond_order="loose",
@@ -86,7 +84,6 @@ def run(args) -> int:
 
     prof_name, chem = profile(args.profile)
 
-    # Baseline: connected mapping; allow disconnected only if user requests it.
     subopt = SubstructureOptions(
         connected_only=not args.allow_disconnected,
         induced=args.induced,

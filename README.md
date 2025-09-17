@@ -1,118 +1,106 @@
-# SMSD Pro 1.0.0
+# SMSD Pro
 
-Fast, chemistry‑aware **substructure** and **MCS** (Maximum Common Subgraph) engines with visualisation. Built for med‑chem search workloads, powered by RDKit for IO and chemistry and our own exact VF2++ subgraph isomorphism and bit‑parallel maximum‑clique core.
+**Small Molecule Subgraph Detector – Pro Edition (v1.0.0)**  
+Fast, configurable substructure and MCS engines with chemistry‑aware constraints and clear RDKit parity modes.
 
-**Heritage.** SMSD Pro continues the ideas introduced in the original **Small Molecule Subgraph Detector (SMSD)** toolkit by S. A. Rahman *et al.* (J. Cheminformatics, 2009) — see the citation below — modernised for today’s Python/RDKit stacks and extended with modular‑product MCS, McGregor‑style extension, recursive SMARTS, and benchmarkable visuals.
+> Heritage: This work builds on the ideas in the original **SMSD** paper:  
+> S. A. Rahman, M. Bashton, G. L. Holliday, R. Schrader, and J. M. Thornton.  
+> *Small Molecule Subgraph Detector (SMSD) toolkit.* **Journal of Cheminformatics** (2009) 1:12. DOI:10.1186/1758-2946-1-12.
 
-- **Repository:** <https://github.com/asad/smsd-pro>  
-- **Author:** Syed Asad Rahman (BioInception PVT LTD)
+**Repository**: https://github.com/asad/smsd-pro  
+**Author**: Syed Asad Rahman (BioInception PVT LTD)
+
+---
+
+## Why SMSD Pro
+
+- **Chemistry‑aware**: atom/bond comparators for aromaticity, charge, valence, ring size/tightness, stereo.
+- **Modern cores**: VF2++ for substructure; modular product + bit‑parallel BBMC for maximum clique; optional McGregor grow step.
+- **Profiles**: out‑of‑the‑box configurations to mimic RDKit behaviour (`rdkit-strict`, `rdkit-flexible`) or to explore very loose matching.
+- **SMARTS‑safe**: recursive SMARTS `$()` are supported; pattern queries avoid unsafe valence calls during extension.
+- **CLI & PNGs**: command‑line tool `smsd-pro` prints sizes, Jaccard/Tanimoto, mappings, and saves comparison PNGs.
 
 ---
 
 ## Install
 
-Python **3.9–3.13** supported.
-
-### Quick start (local editable install)
-
 ```bash
-# Optional: create env
-python -m venv .venv && source .venv/bin/activate
+# (recommended) new env with RDKit
+conda create -n smsdpro -c conda-forge python=3.11 rdkit -y
+conda activate smsdpro
 
-# RDKit (PyPI build) + project
-pip install "rdkit-pypi>=2025.03.1"
+# from source
 pip install -e .
 ```
 
-> If you prefer extras: `pip install -e .[rdkit]` also pulls `rdkit-pypi` for you.
-
-**Why you saw the previous packaging error.** We fixed `pyproject.toml` to use a proper **SPDX license expression** (`Apache-2.0`) and **removed license classifiers** (deprecated by setuptools/PEP 639). If you still have an older file in your working tree, replace it with the one in this release.
+> Packaging follows PEP 621; license uses SPDX string. No legacy license classifiers are used.
 
 ---
 
-## Test
+## Quick start (CLI)
+
+```bash
+# Substructure (first hit by default)
+smsd-pro ss --query "c1ccccc1" --target "c1ccc2ccccc2c1" --profile rdkit-strict --png test_output/ss.png
+
+# Substructure – enumerate all unique target placements
+smsd-pro ss --query "C.C" --target "CC" --all-matches --uniq target_set
+
+# MCS (connected by default; like FMCS)
+smsd-pro mcs --mol1 "NC(=O)c1[nH]c2ccccc2c1S(=O)(=O)N1CCOC(C(=O)N2CCc3c(Br)cccc3C2)C1"              --mol2 "NC(=O)c1[nH]c2ccccc2c1S(=O)(=O)N1CCOC(C(=O)NCCOc2ccccc2Br)C1"              --profile rdkit-strict --png test_output/mcs.png
+```
+
+### Selected flags
+
+- `--profile` one of: `default`, `rdkit-strict`, `rdkit-flexible`, `maximal-loose`.
+- `--connected-only/--no-connected-only` (substructure).
+- `--mcs-type` one of: `MCCS` (connected; default) or `MCIS` (induced).
+- `--all-matches` (substructure) or `--max-matches N`.
+- `--timeout-s` time limit for search; `--extend-timeout-s` for McGregor.
+- `--png` save a side‑by‑side PNG with highlights into `test_output/`.
+
+Run `smsd-pro --help` for the complete reference.
+
+---
+
+## Python API
+
+```python
+from smsd_pro import SMSD, ChemOptions, SubstructureOptions, MCSOptions, profiles
+
+smsd = SMSD("c1ccccc1", "c1ccc2ccccc2c1", chem=profiles.rdkit_strict())
+hit = smsd.substructure_exists(SubstructureOptions())  # True
+
+mr = smsd.mcs_max(MCSOptions(mcs_type="MCCS"))
+print(mr.size, mr.tanimoto_atoms, mr.tanimoto_bonds)
+```
+
+---
+
+## Tests & Bench
 
 ```bash
 pytest -q
+python scripts/bench.py
 ```
 
-What to expect:
-- **Unit tests:** fast checks over 100+ SMILES/SMARTS pairs for both substructure and MCS.  
-- **Visual tests:** PNGs written to **`test_output/`** (created automatically).
-
-Outputs:
-- `test_output/benzene_in_naphthalene.png`
-- `test_output/benzene_mcs.png`
+Outputs are written to **`test_output/`**:
+- `bench_results.csv` & `bench_results.json` – per‑case metrics (speed, atoms, bonds, Tanimoto).
+- PNGs – selected SMSD vs RDKit/FMSC visuals with matched atoms/bonds highlighted.
 
 ---
 
-## Bench
+## Citation & Attribution
 
-```bash
-python scripts/bench.py --limit-png 20
-```
-
-This writes everything under **`test_output/`**:
-- `bench_cases.csv` – per‑pair metrics (existence time, MCS size, algorithm flags)
-- `bench_cases.json` – same in JSON
-- per‑case PNGs: `*_sub.png`, `*_mcs.png`
-- `cases_index.md` – quick index with image links
-
-The curated set includes **SMARTS with recursive `$()`**, classic aromatic/ring cases, stereo examples, a few RDKit “slow pairs”, and chain growth series.
+If you use SMSD Pro in academic or industrial work, please cite both:
+1. **SMSD Pro (this software)** – see `CITATION.cff` at the repository root.
+2. The original **SMSD** paper: Rahman *et al.* J. Cheminf. (2009) 1:12. DOI:10.1186/1758-2946-1-12.
 
 ---
 
-## Usage (API)
+## License & Contribution
 
-```python
-from smsd_pro import SMSD, SubstructureOptions, MCSOptions, ChemOptions
+Licensed under **Apache-2.0**. See `LICENSE` for terms, warranty disclaimer, and limitation of liability.  
+Contributions are welcome – please read `CONTRIBUTING.md` and the `CODE_OF_CONDUCT.md`.
 
-smiles_q = "c1ccccc1"
-smiles_t = "c1ccc2ccccc2c1"
-
-smsd = SMSD(smiles_q, smiles_t, chem=ChemOptions())
-exists = smsd.substructure_exists(SubstructureOptions())
-
-mcs = smsd.mcs_max(MCSOptions(mcs_type="MCIS"))  # or "MCCS"
-print(mcs.size, mcs.algorithm, mcs.tanimoto_atoms, mcs.tanimoto_bonds)
-```
-
-See `smsd_pro/viz.py` for side‑by‑side plotting helpers.
-
----
-
-## How it works (very short)
-
-- **Substructure:** exact VF2++‑style backtracking with chemistry‑aware pruning, ring size options, bond stereo modes, and optional recursive SMARTS `$()` anchored at the current atom.
-- **MCS:** modular product + bit‑parallel maximum clique (BBMC colouring bound). Optional **McGregor extension** grows the seed greedily when the query is a concrete molecule (skipped for SMARTS to avoid RDKit preconditions).
-- **Standardisation:** conservative RDKit `MolStandardize` pipeline (largest fragment, normalise, reionise, uncharge, canonical tautomer).
-
-For a full description, see the whitepaper in `docs/WHITEPAPER.md`.
-
----
-
-## Citation
-
-If you use SMSD Pro in scientific work, please cite:
-
-- **SMSD (2009):** S. A. Rahman, M. Bashton, G. L. Holliday, R. Schrader and J. M. Thornton. *Small Molecule Subgraph Detector (SMSD) toolkit.* **Journal of Cheminformatics** 2009, 1:12. doi:10.1186/1758-2946-1-12.
-
-A software citation is provided in **CITATION.cff**.
-
----
-
-## License & Notice
-
-Licensed under the **Apache License 2.0**.  
-© 2025 BioInception PVT LTD.
-
-This software is provided **“as is”**, without warranties or conditions of any kind. You are responsible for compliance with all laws, regulations, and third‑party rights in your jurisdiction. By using the software you agree that neither the authors nor BioInception shall be liable for any claim, damages, or other liability arising from its use.
-
-We ask — as a goodwill gesture — that derivative works and publications **acknowledge SMSD Pro** and include a reference to the 2009 SMSD paper above.
-
----
-
-## Acknowledgements
-
-Built with love on RDKit. Our thanks to the community for decades of algorithms on subgraph isomorphism, maximum clique, and cheminformatics.
-
+> Public release supported by **BioInception PVT LTD** to enable community reuse in medicinal chemistry and graph algorithms research.

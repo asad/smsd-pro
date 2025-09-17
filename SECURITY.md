@@ -1,8 +1,4 @@
 # Security Policy
 
-If you discover a security or privacy issue, please report it responsibly:
-
-- Email: security@bioinceptionlabs.com
-- Do not create public GitHub issues for sensitive reports.
-
-We will acknowledge receipt within a reasonable timeframe and keep you informed of remediation progress.
+If you discover a vulnerability, please email **security@bioinceptionlabs.com** with details and steps to reproduce.  
+We aim to acknowledge in 72 hours and provide a fix or mitigation plan as quickly as possible.

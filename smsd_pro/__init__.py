@@ -7,4 +7,4 @@ from .engines import SMSD, SubstructureOptions, MCSOptions, MatchResult
 from .chem import ChemOptions
 
 __all__ = ["SMSD", "SubstructureOptions", "MCSOptions", "MatchResult", "ChemOptions"]
-__version__ = "1.0.0"
+__version__ = "1.0.1"

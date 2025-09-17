@@ -1,16 +1,17 @@
-# Bench: What It Runs and What You Get
+# Benchmark Guide
 
 Run:
 ```bash
-python scripts/bench.py --limit-png 20
+python scripts/bench.py
 ```
 
-Outputs (all under `test_output/`):
+Outputs to `test_output/`:
+- `bench_results.csv` and `bench_results.json` with per‑case metrics:
+  - substructure: existence, time (ms)
+  - MCS: atoms, bonds, Tanimoto (atoms/bonds), algorithm, time (ms)
+  - RDKit substructure and FMCS reference sizes/times for context
+- PNGs: selected side‑by‑side comparisons
 
-- `bench_cases.csv` and `bench_cases.json` — metrics per pair (substructure existence time, MCS size/algorithm)  
-- PNGs for each case: `*_sub.png` and `*_mcs.png`  
-- `cases_index.md` — a simple gallery of all generated images
+Includes cases from chains, rings, aromatic vs Kekulé, stereo, functional groups, recursive SMARTS, and one drug‑like pair.
 
-Included examples cover aromatics, E/Z stereo, chain growth, recursive SMARTS like `[C;$(C(=O)O)]` vs `CC(=O)O`, and a few “slow” community cases.
-
-**Background:** This bench continues the lineage of the **Small Molecule Subgraph Detector (SMSD)** by Rahman *et al.* (J. Cheminf. 2009, 1:12; doi:10.1186/1758-2946-1-12). SMSD Pro modernises the algorithms and adds a modular‑product/BBMC MCS core with optional McGregor extension.
+Please cite the original **SMSD** paper: Rahman *et al.* J. Cheminformatics (2009) 1:12. DOI:10.1186/1758-2946-1-12.

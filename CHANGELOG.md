@@ -1,15 +1,8 @@
 # Changelog
 
-## [1.0.0] - 2025-09-16
-### Added
-- Exact VF2++ substructure engine with chemistry-aware pruning
-- MCS via modular product + BBMC maximum clique; optional McGregor extension
-- SMARTS-safe WL colours; recursive SMARTS `$()` anchored to current atom
-- Visualisation helpers and curated benchmark suite (CSV/JSON/PNGs under `test_output/`)
-- Conservative standardisation pipeline (Largest fragment, normalise, reionise, uncharge, canonical tautomer)
-- Complete documentation set: README, WHITEPAPER, bench guide, contribution and security policies, CITATION
-
-### Fixed
-- Packaging metadata: switched to SPDX license expression (`Apache-2.0`) and removed deprecated license classifiers
-- Guarded McGregor on SMARTS queries to avoid RDKit precondition violations
-
+## 1.0.0 — 2025-09-16
+- New CLI: `smsd-pro ss|mcs` with RDKit parity profiles.
+- MCCS (connected) as default MCS; true non‑induced MCSS vs induced MCIS selectable.
+- McGregor extension automatically skipped for SMARTS queries (safety).
+- Bench overhaul: richer CSV/JSON, PNGs to `test_output/`.
+- Docs: README, WHITEPAPER, bench_README, CITATION, security, conduct, contributing.

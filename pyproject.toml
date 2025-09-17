@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "smsd-pro"
 version = "1.0.0"
-description = "SMSD-Pro: fast substructure & MCS engines with rich chemistry (BioInception PVT LTD)"
+description = "SMSD Pro: fast substructure & MCS engines with rich chemistry (BioInception PVT LTD)"
 readme = "README.md"
 requires-python = ">=3.9,<3.14"
 license = "Apache-2.0"
 authors = [
   { name = "Syed Asad Rahman", email = "asad.rahman@bioinceptionlabs.com" },
-  { name = "BioInception PVT LTD", email = "info@bioinceptionlabs.com" }
+  { name = "BioInception PVT LTD", email = "support@bioinceptionlabs.com" }
 ]
 keywords = ["cheminformatics", "substructure", "MCS", "clique", "medchem", "SMSD", "RDKit"]
 classifiers = [
@@ -29,6 +29,9 @@ Homepage = "https://github.com/asad/smsd-pro"
 
 [project.optional-dependencies]
 rdkit = ["rdkit-pypi>=2025.03.1"]
+
+[project.scripts]
+smsd-pro = "smsd_pro.cli:main"
 
 [tool.setuptools]
 packages = ["smsd_pro"]
